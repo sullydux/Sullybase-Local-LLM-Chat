@@ -2,7 +2,11 @@
 <img src="Icon.png" alt="Sullybase Icon" style="float: left; margin-right: 15px; width: 240px; height: 240px;">
 </div>
 
-# [Sullybase Local LLM Chat](https://sullydux.github.io/Sullybase-Local-LLM-Chat/)
+---
+<div align="center">
+# [Sullybase Local LLM Chat](https://sullydux.github.io/Sullybase-Local-LLM-Chat/) 
+v1.1.0
+</div>
 
 A lightweight application for chatting with local LLMs via **Ollama**. Whether you're online or offline, Sullybase Local LLM Chat gives you full control over your AI conversations with privacy and speed.
 
@@ -73,7 +77,6 @@ Sullybase is primarily built for macOS. To run on Windows:
 
 ## Future Updates (not in order)
 
-- **Markdown Chat Interface**: Cleaner, formatted rendering of codeblocks, equations, and tables  
 - **Gemini API Support**: Optional cloud with Gemini API, you will need your own keys  
 - **Chat Names**: The AI will name every chat
 - **Website Control**: Run the AI on device and use WiFi to conttrol it with Iphone
@@ -84,11 +87,11 @@ Sullybase is primarily built for macOS. To run on Windows:
 
 Contributions are welcome! Before adding features or fixing bugs:
 
-1. **Ask First**: Open an issue or contact me via email  
-2. **Discuss**: We'll talk through the idea to make sure it aligns with the project  
+1. **Ask First**: Open an issue  
+2. **Discuss**: I will accept/decline the idea and make sure it aligns with the project  
 3. **Submit**: Fork, make changes, and open a pull request
 
-Use **GitHub Issues** or **email** to notify me.
+Use **GitHub Issues** to notify me.
 
 ---
 

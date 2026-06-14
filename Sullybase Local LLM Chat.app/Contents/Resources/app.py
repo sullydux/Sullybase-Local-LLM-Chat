@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Sullybase Local LLM Chat  v1.0.0
+Sullybase Local LLM Chat  v1.2.0
 A production-quality Tkinter frontend for Ollama local LLMs.
 """
 
@@ -10,6 +10,7 @@ import logging
 import logging.handlers
 import os
 import queue
+import re
 import sys
 import threading
 import traceback
@@ -34,13 +35,25 @@ from tkinter import filedialog, messagebox, ttk
 
 APP_NAME    = "Sullybase Local LLM Chat"
 APP_BUNDLE  = "Sullybase-LLM-Chat"
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.1.0"
 
 AI_SYSTEM_PROMPT = (
-    "You are Sullybase AI, a helpful local LLM assistant. "
+    "You are a Local LLM from Ollama, a helpful assistant. "
+    "This application is Sullybase Local LLM Chat. "
     "You assist with coding, science, and general questions. "
-    "Be clear, concise, and technically accurate."
-    "This front end software is Copyright © 2026 Sullydux (GitHub). All rights reserved. Effective Date: June 13, 2026"
+    "Be clear, concise, and technically accurate.\n\n"
+    "This front end is Copyright © 2026 Sullydux (GitHub). All rights reserved. Effective Date: June 13, 2026\n\n"
+    "You have full Markdown rendering support in this chat. Use it freely:\n"
+    "• **bold**, *italic*, ~~strikethrough~~, `inline code`\n"
+    "• # Heading 1 / ## Heading 2 / ### Heading 3\n"
+    "• Fenced code blocks with language hints (e.g. ```python) for syntax highlighting\n"
+    "• - Unordered lists, 1. Ordered lists, nested lists (indent 2 spaces)\n"
+    "• - [ ] Task checkboxes and - [x] checked boxes\n"
+    "• > Blockquotes\n"
+    "• | Tables | with | headers |\n"
+    "• [Link text](https://url) and bare URLs\n"
+    "• --- Horizontal rules\n\n"
+    "Always use appropriate Markdown to make responses clear and readable."
 )
 
 # ── Palette ──────────────────────────────────────────────────────────────────
@@ -60,6 +73,11 @@ BG_BTN_NEW    = "#1e3a2e"
 BG_BTN_NEW_H  = "#25503d"
 BG_PATH_OK    = "#1e2e1e"
 BG_PATH_BAD   = "#2e1e1e"
+BG_CODE       = "#0d1117"   # code block background (GitHub-dark style)
+BG_BLOCKQUOTE = "#1e2433"   # blockquote background
+BG_TABLE_HDR  = "#1a2a3a"   # table header background
+BG_TABLE_ROW  = "#1e1e1e"   # table row background
+BG_TABLE_ALT  = "#222222"   # alternating table row
 
 FG_PRIMARY  = "#e8e8e8"
 FG_DIM      = "#888888"
@@ -70,6 +88,20 @@ FG_ASST     = "#e8e8e8"
 FG_BADGE    = "#7ab87a"
 FG_PATH_OK  = "#7ab87a"
 FG_PATH_BAD = "#e07070"
+FG_CODE     = "#c9d1d9"    # code text
+FG_LINK     = "#58a6ff"    # URL colour
+FG_STRIKE   = "#888888"    # strikethrough text
+FG_BLOCKQUOTE = "#aaaaaa"  # blockquote text
+FG_TABLE_HDR  = "#4ec994"  # table header text
+
+# ── Syntax highlight colours (minimal, readable on dark) ─────────────────────
+SH_KEYWORD  = "#ff7b72"   # red  – keywords
+SH_STRING   = "#a5d6ff"   # blue – strings
+SH_COMMENT  = "#8b949e"   # grey – comments
+SH_NUMBER   = "#f2cc60"   # gold – numbers
+SH_FUNC     = "#d2a8ff"   # purple – functions/decorators
+SH_BUILTIN  = "#ffa657"   # orange – builtins / types
+SH_DEFAULT  = FG_CODE
 
 # ── Fonts ────────────────────────────────────────────────────────────────────
 FONT_UI   = ("SF Pro Display", 12)
@@ -80,12 +112,14 @@ FONT_BOLD = ("SF Pro Display", 11, "bold")
 
 # ── Limits & tuning ──────────────────────────────────────────────────────────
 OLLAMA_BASE          = "http://localhost:11434"
-OLLAMA_TIMEOUT       = (10, 300)      # (connect_sec, read_sec)
+OLLAMA_TIMEOUT       = (10, 300)
+OLLAMA_TITLE_TIMEOUT = (10, 30)
 MAX_FILE_SIZE        = 2 * 1024 * 1024
 NETWORK_RETRIES      = 3
 NETWORK_RETRY_DELAY  = 1.0
-DRAIN_INTERVAL_MS    = 30             # token queue poll rate
+DRAIN_INTERVAL_MS    = 30
 DEFAULT_CHAT_TITLE   = "New chat"
+MAX_TITLE_LEN        = 20
 
 # ── File exclusions ───────────────────────────────────────────────────────────
 EXCLUDED_NAMES: set = {
@@ -111,6 +145,91 @@ ALLOWED_TEXT_EXTS: set = {
 _DONE  = object()
 _ERROR = object()
 _TOKEN = object()
+
+# ── Syntax highlight keyword sets ────────────────────────────────────────────
+_SH_RULES: Dict[str, List[Tuple[str, str]]] = {
+    "python": [
+        (r"\b(def|class|return|import|from|as|if|elif|else|for|while|in|not|and|or|is|None|True|False|try|except|finally|with|yield|lambda|pass|break|continue|raise|del|global|nonlocal|assert|async|await)\b", SH_KEYWORD),
+        (r'"""[\s\S]*?"""|\'\'\'[\s\S]*?\'\'\'|"[^"\\]*(?:\\.[^"\\]*)*"|\'[^\'\\]*(?:\\.[^\'\\]*)*\'', SH_STRING),
+        (r"#[^\n]*", SH_COMMENT),
+        (r"\b\d+\.?\d*\b", SH_NUMBER),
+        (r"@\w+", SH_FUNC),
+        (r"\b(print|len|range|type|int|str|float|list|dict|set|tuple|bool|open|zip|map|filter|enumerate|super|self)\b", SH_BUILTIN),
+    ],
+    "javascript": [
+        (r"\b(const|let|var|function|return|import|export|from|if|else|for|while|in|of|class|extends|new|this|typeof|instanceof|null|undefined|true|false|try|catch|finally|throw|async|await|=>)\b", SH_KEYWORD),
+        (r'`[^`]*`|"[^"\\]*(?:\\.[^"\\]*)*"|\'[^\'\\]*(?:\\.[^\'\\]*)*\'', SH_STRING),
+        (r"//[^\n]*|/\*[\s\S]*?\*/", SH_COMMENT),
+        (r"\b\d+\.?\d*\b", SH_NUMBER),
+        (r"\b(console|document|window|Math|Array|Object|String|Number|Boolean|Promise|fetch)\b", SH_BUILTIN),
+    ],
+    "typescript": [],  # will fall through to javascript rules
+    "bash": [
+        (r"\b(if|then|else|elif|fi|for|do|done|while|case|esac|function|in|echo|exit|return|local|export|source)\b", SH_KEYWORD),
+        (r'"[^"\\]*(?:\\.[^"\\]*)*"|\'[^\'\\]*\'', SH_STRING),
+        (r"#[^\n]*", SH_COMMENT),
+        (r"\$\w+|\$\{[^}]+\}", SH_FUNC),
+        (r"\b\d+\b", SH_NUMBER),
+    ],
+    "sql": [
+        (r"\b(SELECT|FROM|WHERE|JOIN|ON|AS|INSERT|INTO|VALUES|UPDATE|SET|DELETE|CREATE|TABLE|INDEX|DROP|ALTER|ADD|PRIMARY|KEY|FOREIGN|REFERENCES|NOT|NULL|AND|OR|IN|LIKE|BETWEEN|ORDER|BY|GROUP|HAVING|LIMIT|OFFSET|DISTINCT|COUNT|SUM|AVG|MAX|MIN|LEFT|RIGHT|INNER|OUTER|FULL|UNION|ALL|EXISTS|CASE|WHEN|THEN|ELSE|END)\b", SH_KEYWORD),
+        (r"'[^']*'", SH_STRING),
+        (r"--[^\n]*|/\*[\s\S]*?\*/", SH_COMMENT),
+        (r"\b\d+\.?\d*\b", SH_NUMBER),
+    ],
+    "go": [
+        (r"\b(func|var|const|type|struct|interface|return|import|package|if|else|for|range|switch|case|default|break|continue|go|defer|chan|map|make|new|nil|true|false|error)\b", SH_KEYWORD),
+        (r'"[^"\\]*(?:\\.[^"\\]*)*"|`[^`]*`', SH_STRING),
+        (r"//[^\n]*|/\*[\s\S]*?\*/", SH_COMMENT),
+        (r"\b\d+\.?\d*\b", SH_NUMBER),
+        (r"\b(fmt|os|io|net|http|strings|strconv|errors|log|sync|time|context)\b", SH_BUILTIN),
+    ],
+    "rust": [
+        (r"\b(fn|let|mut|pub|struct|enum|impl|trait|use|mod|return|if|else|for|while|loop|match|break|continue|in|true|false|None|Some|Ok|Err|self|Self|super|crate|async|await|move|ref|type|where|const|static)\b", SH_KEYWORD),
+        (r'"[^"\\]*(?:\\.[^"\\]*)*"|r#".*?"#', SH_STRING),
+        (r"//[^\n]*|/\*[\s\S]*?\*/", SH_COMMENT),
+        (r"\b\d+\.?\d*\b", SH_NUMBER),
+        (r"\b(println!|print!|vec!|format!|panic!|assert!|Option|Result|String|Vec|HashMap)\b", SH_BUILTIN),
+    ],
+    "java": [
+        (r"\b(public|private|protected|static|final|class|interface|extends|implements|return|import|package|if|else|for|while|do|switch|case|break|continue|new|this|super|null|true|false|void|int|long|double|float|boolean|String|try|catch|finally|throw|throws|abstract|synchronized|volatile)\b", SH_KEYWORD),
+        (r'"[^"\\]*(?:\\.[^"\\]*)*"', SH_STRING),
+        (r"//[^\n]*|/\*[\s\S]*?\*/", SH_COMMENT),
+        (r"\b\d+\.?\d*[LlFfDd]?\b", SH_NUMBER),
+        (r"@\w+", SH_FUNC),
+    ],
+    "css": [
+        (r"[.#][\w-]+|:[\w-]+|::[\w-]+", SH_FUNC),
+        (r"#[0-9a-fA-F]{3,6}|rgba?\([^)]+\)", SH_NUMBER),
+        (r'"[^"]*"|\'[^\']*\'', SH_STRING),
+        (r"/\*[\s\S]*?\*/", SH_COMMENT),
+        (r"\b(color|background|margin|padding|font|border|display|position|width|height|flex|grid|transform|transition|animation)\b", SH_KEYWORD),
+    ],
+    "html": [
+        (r"<!--[\s\S]*?-->", SH_COMMENT),
+        (r'"[^"]*"|\'[^\']*\'', SH_STRING),
+        (r"</?[\w]+|/>|>", SH_KEYWORD),
+        (r"\b[\w-]+=", SH_FUNC),
+    ],
+    "json": [
+        (r'"[^"\\]*(?:\\.[^"\\]*)*"', SH_STRING),
+        (r"\b(true|false|null)\b", SH_KEYWORD),
+        (r"\b-?\d+\.?\d*(?:[eE][+-]?\d+)?\b", SH_NUMBER),
+    ],
+    "yaml": [
+        (r"#[^\n]*", SH_COMMENT),
+        (r'"[^"]*"|\'[^\']*\'', SH_STRING),
+        (r"^\s*[\w-]+:", SH_FUNC),
+        (r"\b(true|false|null|yes|no)\b", SH_KEYWORD),
+        (r"\b-?\d+\.?\d*\b", SH_NUMBER),
+    ],
+}
+# aliases
+_SH_RULES["js"] = _SH_RULES["javascript"]
+_SH_RULES["ts"] = _SH_RULES["javascript"]
+_SH_RULES["typescript"] = _SH_RULES["javascript"]
+_SH_RULES["sh"] = _SH_RULES["bash"]
+_SH_RULES["shell"] = _SH_RULES["bash"]
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -177,8 +296,8 @@ class ChatMessage:
 
 @dataclass
 class ContextFile:
-    label: str   # display label, e.g. "📄 foo.py  (1,234 chars)"
-    text:  str   # raw content sent to the model
+    label: str
+    text:  str
 
 
 @dataclass
@@ -229,7 +348,6 @@ def _read_json(path: Path) -> Optional[dict]:
 
 
 def _write_json(path: Path, data: dict) -> bool:
-    """Atomic write: write to .tmp then rename."""
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.parent / f".{path.name}.tmp"
@@ -241,6 +359,7 @@ def _write_json(path: Path, data: dict) -> bool:
     except Exception as exc:
         logger.error(f"_write_json {path}: {exc}")
         return False
+
 
 def _read_text(path: Path) -> Optional[str]:
     try:
@@ -280,7 +399,6 @@ def validate_path(raw: str) -> Tuple[bool, str]:
         p = Path(raw.strip()).expanduser().resolve()
         if not p.exists():
             return False, f"✗  Not found: {p}"
-
         if p.is_file():
             if _is_excluded(p):
                 return False, f"✗  Excluded: {p.name}"
@@ -290,7 +408,6 @@ def validate_path(raw: str) -> Tuple[bool, str]:
             if size > MAX_FILE_SIZE:
                 return False, f"✗  Too large ({size / 1024:.0f} KB > 2 MB)"
             return True, f"✓  File · {p.name}  ({size / 1024:.0f} KB)"
-
         if p.is_dir():
             count = 0
             for c in p.rglob("*"):
@@ -306,18 +423,15 @@ def validate_path(raw: str) -> Tuple[bool, str]:
             if count == 0:
                 return False, "✗  No readable text files found"
             return True, f"✓  Folder · {p.name}  ({count} file{'s' if count != 1 else ''})"
-
         return False, "✗  Unknown path type"
     except Exception as exc:
         return False, f"✗  Error: {exc}"
 
 
 def load_context_path(raw: str) -> List[ContextFile]:
-    """Load a file or folder; return list of ContextFile. Raises on failure."""
     p = Path(raw.strip()).expanduser().resolve()
     if not p.exists():
         raise FileNotFoundError(f"Path not found: {p}")
-
     if p.is_file():
         if _is_excluded(p):
             raise ValueError(f"Excluded file: {p.name}")
@@ -327,7 +441,6 @@ def load_context_path(raw: str) -> List[ContextFile]:
         if text is None:
             raise IOError(f"Could not read: {p.name}")
         return [ContextFile(label=f"📄 {p.name}  ({len(text):,} chars)", text=text)]
-
     if p.is_dir():
         results: List[ContextFile] = []
         for child in sorted(p.rglob("*")):
@@ -351,7 +464,6 @@ def load_context_path(raw: str) -> List[ContextFile]:
         if not results:
             raise ValueError("No readable text files found in folder.")
         return results
-
     raise ValueError(f"Not a file or folder: {p}")
 
 
@@ -458,6 +570,32 @@ class OllamaClient:
                 return []
         return []
 
+    def generate_title(self, model: str, user_text: str) -> str:
+        prompt = (
+            f"In {MAX_TITLE_LEN} characters or fewer, write a short title that "
+            f"summarises this message. Reply with ONLY the title text — no quotes, "
+            f"no punctuation at the end, no extra words.\n\nMessage: {user_text[:400]}"
+        )
+        try:
+            resp = self._session.post(
+                f"{self.base_url}/api/chat",
+                json={
+                    "model": model,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "stream": False,
+                },
+                timeout=OLLAMA_TITLE_TIMEOUT,
+            )
+            resp.raise_for_status()
+            raw = resp.json().get("message", {}).get("content", "").strip()
+            raw = raw.strip('"\'')
+            if len(raw) > MAX_TITLE_LEN:
+                raw = raw[:MAX_TITLE_LEN].rstrip()
+            return raw or DEFAULT_CHAT_TITLE
+        except Exception as exc:
+            logger.warning(f"generate_title failed: {exc}")
+            return DEFAULT_CHAT_TITLE
+
     def chat_stream(
         self,
         model: str,
@@ -510,7 +648,330 @@ class OllamaClient:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  HoverButton — tk.Label that acts as a clickable button
+#  Syntax highlighter
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _highlight_code(widget: tk.Text, code: str, lang: str, start_idx: str) -> None:
+    """
+    Apply syntax-highlight tags to a code block already inserted into `widget`.
+    `start_idx` is the tk index of the first character of `code` in the widget.
+    """
+    rules = _SH_RULES.get(lang.lower(), [])
+    if not rules:
+        return
+
+    lines = code.split("\n")
+
+    for pat, color in rules:
+        tag = f"sh_{color.replace('#', '')}"
+        widget.tag_configure(tag, foreground=color)
+        pos = 0
+        for line_no, line in enumerate(lines):
+            for m in re.finditer(pat, line):
+                row = int(start_idx.split(".")[0]) + line_no
+                col_s = m.start()
+                col_e = m.end()
+                widget.tag_add(tag, f"{row}.{col_s}", f"{row}.{col_e}")
+            pos += len(line) + 1
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  Markdown renderer for tk.Text widgets  (v2 — extended)
+# ══════════════════════════════════════════════════════════════════════════════
+
+class MarkdownRenderer:
+    """
+    Renders markdown into a tk.Text widget.
+
+    Supported syntax:
+      Headings:       # / ## / ###
+      Emphasis:       **bold**, *italic*, ~~strikethrough~~, `inline code`
+      Links:          [text](url) and bare https?://...
+      Code blocks:    ``` fenced (with optional language hint + syntax highlighting)
+      Lists:          - / * / + unordered (nested via leading spaces)
+                      1. ordered (nested)
+      Task lists:     - [ ] unchecked   - [x] checked
+      Blockquotes:    > text (nestable with >>)
+      Tables:         | Col | Col |  with header separator
+      Horizontal rule: --- / *** / ___
+      Plain text with wrapping
+    """
+
+    # ── Compiled patterns ────────────────────────────────────────────────────
+    _RE_FENCE   = re.compile(r"^(`{3,})([\w+-]*)")
+    _RE_H3      = re.compile(r"^###\s+(.+)")
+    _RE_H2      = re.compile(r"^##\s+(.+)")
+    _RE_H1      = re.compile(r"^#\s+(.+)")
+    _RE_UL      = re.compile(r"^(\s*)[-*+]\s+(.+)")
+    _RE_OL      = re.compile(r"^(\s*)\d+\.\s+(.+)")
+    _RE_TASK_U  = re.compile(r"^(\s*)[-*+]\s+\[ \]\s+(.+)")
+    _RE_TASK_C  = re.compile(r"^(\s*)[-*+]\s+\[x\]\s+(.+)", re.IGNORECASE)
+    _RE_BQ      = re.compile(r"^(>+)\s?(.*)")
+    _RE_HR      = re.compile(r"^(\-{3,}|\*{3,}|_{3,})\s*$")
+    _RE_TABLE_R = re.compile(r"^\|(.+)\|$")
+    _RE_TABLE_S = re.compile(r"^\|[\s\-:|]+\|$")
+
+    _RE_INLINE  = re.compile(
+        r"(\*\*|__)(.+?)\1"                    # bold
+        r"|~~(.+?)~~"                           # strikethrough
+        r"|(\*|_)(.+?)\4"                       # italic
+        r"|`([^`]+)`"                           # inline code
+        r"|\[([^\]]+)\]\(([^)]+)\)"            # [text](url)
+        r"|(https?://\S+)"                      # bare URL
+    )
+
+    def __init__(self, widget: tk.Text, bubble_bg: str, text_fg: str):
+        self._w   = widget
+        self._bg  = bubble_bg
+        self._fg  = text_fg
+        self._configure_tags()
+
+    def _configure_tags(self):
+        w = self._w
+        w.tag_configure("h1",   font=("SF Pro Display", 17, "bold"),
+                        foreground=FG_ACCENT, spacing3=6)
+        w.tag_configure("h2",   font=("SF Pro Display", 14, "bold"),
+                        foreground=FG_ACCENT, spacing3=4)
+        w.tag_configure("h3",   font=("SF Pro Display", 12, "bold"),
+                        foreground=FG_ACCENT, spacing3=2)
+        w.tag_configure("bold",   font=("SF Pro Display", 12, "bold"),
+                        foreground=self._fg)
+        w.tag_configure("italic", font=("SF Pro Display", 12, "italic"),
+                        foreground=self._fg)
+        w.tag_configure("strike", font=("SF Pro Display", 12),
+                        foreground=FG_STRIKE, overstrike=True)
+        w.tag_configure("code_inline",
+                        font=FONT_MONO, background=BG_CODE, foreground=FG_CODE)
+        w.tag_configure("code_block",
+                        font=FONT_MONO, background=BG_CODE, foreground=FG_CODE,
+                        lmargin1=12, lmargin2=12, spacing1=3, spacing3=3)
+        w.tag_configure("blockquote",
+                        background=BG_BLOCKQUOTE, foreground=FG_BLOCKQUOTE,
+                        lmargin1=20, lmargin2=20, spacing1=2, spacing3=2,
+                        font=("SF Pro Display", 12, "italic"))
+        w.tag_configure("ul_item",    lmargin1=16, lmargin2=28)
+        w.tag_configure("ul_item_2",  lmargin1=36, lmargin2=48)
+        w.tag_configure("ul_item_3",  lmargin1=56, lmargin2=68)
+        w.tag_configure("ol_item",    lmargin1=16, lmargin2=32)
+        w.tag_configure("ol_item_2",  lmargin1=36, lmargin2=52)
+        w.tag_configure("task_box",   font=("SF Mono", 11), foreground=FG_ACCENT)
+        w.tag_configure("task_done",  font=("SF Pro Display", 12),
+                        foreground=FG_DIM, overstrike=True)
+        w.tag_configure("hr",         foreground="#444444", spacing1=6, spacing3=6)
+        w.tag_configure("link",       foreground=FG_LINK, underline=True)
+        w.tag_configure("normal",     foreground=self._fg)
+        # Table tags
+        w.tag_configure("tbl_hdr",
+                        font=("SF Pro Display", 11, "bold"),
+                        foreground=FG_TABLE_HDR, background=BG_TABLE_HDR,
+                        spacing1=3, spacing3=3, lmargin1=8, lmargin2=8)
+        w.tag_configure("tbl_row",
+                        font=("SF Pro Display", 11),
+                        foreground=self._fg, background=BG_TABLE_ROW,
+                        spacing1=2, spacing3=2, lmargin1=8, lmargin2=8)
+        w.tag_configure("tbl_alt",
+                        font=("SF Pro Display", 11),
+                        foreground=self._fg, background=BG_TABLE_ALT,
+                        spacing1=2, spacing3=2, lmargin1=8, lmargin2=8)
+
+    # ── Public entry point ───────────────────────────────────────────────────
+
+    def render(self, text: str) -> None:
+        w = self._w
+        lines = text.split("\n")
+        i, n  = 0, len(lines)
+
+        while i < n:
+            line = lines[i]
+
+            # ── Fenced code block ─────────────────────────────────────────
+            fm = self._RE_FENCE.match(line)
+            if fm:
+                fence_char = fm.group(1)
+                lang       = fm.group(2).strip()
+                i += 1
+                code_lines = []
+                while i < n and not lines[i].startswith(fence_char):
+                    code_lines.append(lines[i])
+                    i += 1
+                i += 1  # skip closing fence
+                code_text = "\n".join(code_lines)
+                start_idx = w.index("end-1c")
+                w.insert("end", code_text + "\n", "code_block")
+                if lang:
+                    try:
+                        _highlight_code(w, code_text, lang, start_idx)
+                    except Exception:
+                        pass
+                continue
+
+            # ── Table detection (collect all rows) ───────────────────────
+            if self._RE_TABLE_R.match(line):
+                table_lines = []
+                while i < n and self._RE_TABLE_R.match(lines[i]):
+                    table_lines.append(lines[i])
+                    i += 1
+                self._render_table(table_lines)
+                continue
+
+            # ── Blockquote ────────────────────────────────────────────────
+            bm = self._RE_BQ.match(line)
+            if bm:
+                content = bm.group(2)
+                w.insert("end", "▌ ", ("blockquote", "normal"))
+                self._insert_inline(content, "blockquote")
+                w.insert("end", "\n")
+                i += 1
+                continue
+
+            # ── Headings ──────────────────────────────────────────────────
+            m = self._RE_H3.match(line)
+            if m:
+                self._insert_inline(m.group(1), "h3")
+                w.insert("end", "\n")
+                i += 1
+                continue
+            m = self._RE_H2.match(line)
+            if m:
+                self._insert_inline(m.group(1), "h2")
+                w.insert("end", "\n")
+                i += 1
+                continue
+            m = self._RE_H1.match(line)
+            if m:
+                self._insert_inline(m.group(1), "h1")
+                w.insert("end", "\n")
+                i += 1
+                continue
+
+            # ── HR ────────────────────────────────────────────────────────
+            if self._RE_HR.match(line):
+                w.insert("end", "─" * 52 + "\n", "hr")
+                i += 1
+                continue
+
+            # ── Task list (must check before plain UL) ────────────────────
+            tm = self._RE_TASK_C.match(line)
+            if tm:
+                indent = len(tm.group(1)) // 2
+                lvl_tag = f"ul_item{'_'+str(min(indent+1,3)) if indent else ''}"
+                w.insert("end", "☑ ", ("task_box",))
+                self._insert_inline(tm.group(2), "task_done")
+                w.insert("end", "\n")
+                i += 1
+                continue
+            tm = self._RE_TASK_U.match(line)
+            if tm:
+                w.insert("end", "☐ ", ("task_box",))
+                self._insert_inline(tm.group(2), "normal")
+                w.insert("end", "\n")
+                i += 1
+                continue
+
+            # ── Unordered list ────────────────────────────────────────────
+            m = self._RE_UL.match(line)
+            if m:
+                indent = len(m.group(1)) // 2
+                bullets = ["•", "◦", "▸"]
+                bul = bullets[min(indent, 2)]
+                lvl_tag = ["ul_item", "ul_item_2", "ul_item_3"][min(indent, 2)]
+                w.insert("end", f"{bul} ", (lvl_tag, "normal"))
+                self._insert_inline(m.group(2), lvl_tag)
+                w.insert("end", "\n")
+                i += 1
+                continue
+
+            # ── Ordered list ──────────────────────────────────────────────
+            m = self._RE_OL.match(line)
+            if m:
+                indent = len(m.group(1)) // 2
+                lvl_tag = ["ol_item", "ol_item_2"][min(indent, 1)]
+                num = line.lstrip().split(".")[0] + ". "
+                w.insert("end", num, (lvl_tag, "normal"))
+                self._insert_inline(m.group(2), lvl_tag)
+                w.insert("end", "\n")
+                i += 1
+                continue
+
+            # ── Plain / inline-styled line ────────────────────────────────
+            self._insert_inline(line, "normal")
+            w.insert("end", "\n")
+            i += 1
+
+    # ── Table renderer ───────────────────────────────────────────────────────
+
+    def _render_table(self, rows: List[str]) -> None:
+        w = self._w
+        # Filter out separator rows
+        data_rows = [r for r in rows if not self._RE_TABLE_S.match(r)]
+        if not data_rows:
+            return
+
+        for row_idx, row in enumerate(data_rows):
+            cells = [c.strip() for c in row.strip("|").split("|")]
+            tag = "tbl_hdr" if row_idx == 0 else ("tbl_alt" if row_idx % 2 == 0 else "tbl_row")
+            line = "  ".join(f"{cell:<20}" for cell in cells)
+            w.insert("end", line + "\n", tag)
+
+        w.insert("end", "\n")
+
+    # ── Inline markdown ──────────────────────────────────────────────────────
+
+    def _insert_inline(self, text: str, base_tag: str) -> None:
+        w   = self._w
+        pos = 0
+        for m in self._RE_INLINE.finditer(text):
+            if m.start() > pos:
+                w.insert("end", text[pos:m.start()], (base_tag, "normal"))
+
+            (bold_del, bold_txt,
+             strike_txt,
+             ital_del, ital_txt,
+             code_txt,
+             link_label, link_url,
+             bare_url) = m.groups()
+
+            if bold_txt is not None:
+                w.insert("end", bold_txt, (base_tag, "bold"))
+            elif strike_txt is not None:
+                w.insert("end", strike_txt, (base_tag, "strike"))
+            elif ital_txt is not None:
+                w.insert("end", ital_txt, (base_tag, "italic"))
+            elif code_txt is not None:
+                w.insert("end", code_txt, "code_inline")
+            elif link_label is not None:
+                tag = f"link_{id(m)}"
+                w.tag_configure(tag, foreground=FG_LINK, underline=True)
+                w.tag_bind(tag, "<Button-1>",
+                           lambda e, url=link_url: self._open_url(url))
+                w.tag_bind(tag, "<Enter>", lambda e: w.config(cursor="hand2"))
+                w.tag_bind(tag, "<Leave>", lambda e: w.config(cursor="arrow"))
+                w.insert("end", link_label, (tag, "link"))
+            elif bare_url is not None:
+                tag = f"url_{id(m)}"
+                w.tag_configure(tag, foreground=FG_LINK, underline=True)
+                w.tag_bind(tag, "<Button-1>",
+                           lambda e, url=bare_url: self._open_url(url))
+                w.tag_bind(tag, "<Enter>", lambda e: w.config(cursor="hand2"))
+                w.tag_bind(tag, "<Leave>", lambda e: w.config(cursor="arrow"))
+                w.insert("end", bare_url, (tag, "link"))
+
+            pos = m.end()
+
+        if pos < len(text):
+            w.insert("end", text[pos:], (base_tag, "normal"))
+
+    @staticmethod
+    def _open_url(url: str) -> None:
+        import webbrowser
+        try:
+            webbrowser.open(url)
+        except Exception as exc:
+            logger.warning(f"open_url {url}: {exc}")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  HoverButton
 # ══════════════════════════════════════════════════════════════════════════════
 
 class HoverButton(tk.Label):
@@ -550,12 +1011,10 @@ class HoverButton(tk.Label):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  Context Panel (left sidebar section)
+#  Context Panel
 # ══════════════════════════════════════════════════════════════════════════════
 
 class ContextPanel(tk.Frame):
-    """Shows loaded context files with per-file ✕ remove buttons."""
-
     def __init__(self, parent, on_change, **kw):
         super().__init__(parent, bg=BG_SIDEBAR, **kw)
         self._on_change = on_change
@@ -623,7 +1082,7 @@ class ContextPanel(tk.Frame):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  History Panel (left sidebar section)
+#  History Panel
 # ══════════════════════════════════════════════════════════════════════════════
 
 class HistoryPanel(tk.Frame):
@@ -679,25 +1138,20 @@ class HistoryPanel(tk.Frame):
             messagebox.showwarning("No selection", "Select a chat to delete.",
                                   parent=self.winfo_toplevel())
             return
-
-        chat_id = self._chats[sel[0]].get("id", "")
+        chat_id    = self._chats[sel[0]].get("id", "")
         chat_title = self._chats[sel[0]].get("title", DEFAULT_CHAT_TITLE)
-
         if not messagebox.askyesno("Delete chat",
                                    f'Delete "{chat_title}"?\nThis cannot be undone.',
                                    parent=self.winfo_toplevel()):
             return
-
         try:
             chat_file = ChatStore._path(chat_id)
             if chat_file.exists():
                 chat_file.unlink()
-
             index = ChatStore.load_index()
             index["chats"] = [c for c in index.get("chats", [])
-                             if c.get("id") != chat_id]
+                              if c.get("id") != chat_id]
             ChatStore.save_index(index)
-
             self.refresh()
             logger.info(f"Deleted chat: {chat_id}")
         except Exception as exc:
@@ -731,11 +1185,14 @@ class SullybaseApp(tk.Tk):
         self._tok_queue: queue.Queue = queue.Queue()
         self._drain_id:  Optional[str] = None
         self._asst_tw:   Optional[tk.Text] = None
+        self._asst_md:   Optional[MarkdownRenderer] = None
+        self._asst_buf:  str = ""
 
         self._chat_id   = self._settings.get("current_chat_id", "current")
         self._chat_meta = self._blank_meta(self._chat_id)
         self._history:  List[ChatMessage] = []
         self._last_user = ""
+        self._is_first_message = True   # True until first exchange in THIS chat
 
         self._model_var = tk.StringVar(value=self._settings.get("model", ""))
 
@@ -928,8 +1385,8 @@ class SullybaseApp(tk.Tk):
             scrollregion=self._canvas.bbox("all")))
         self.after(30,  lambda: self._canvas.yview_moveto(1.0))
 
-    def _add_bubble(self, role: str, text: str = "") -> tk.Text:
-        is_user = (role == "user")
+    def _add_bubble(self, role: str, text: str = "") -> Tuple[tk.Text, Optional[MarkdownRenderer]]:
+        is_user   = (role == "user")
         bubble_bg = BG_BUBBLE_U if is_user else BG_BUBBLE_A
         text_fg   = FG_USER     if is_user else FG_ASST
 
@@ -968,13 +1425,20 @@ class SullybaseApp(tk.Tk):
         else:
             tw.pack(fill="x", expand=True)
 
-        if text:
-            tw.insert("1.0", text)
+        renderer: Optional[MarkdownRenderer] = None
+        if is_user:
+            if text:
+                tw.insert("1.0", text)
+            tw.config(state="disabled")
+        else:
+            renderer = MarkdownRenderer(tw, bubble_bg, text_fg)
+            if text:
+                renderer.render(text)
+                tw.config(state="disabled")
 
-        tw.config(state="disabled")
         self._fit_bubble(tw)
         self._scroll_to_bottom()
-        return tw
+        return tw, renderer
 
     def _fit_bubble(self, tw: tk.Text) -> None:
         try:
@@ -984,10 +1448,12 @@ class SullybaseApp(tk.Tk):
         except Exception:
             pass
 
-    def _append_token(self, tw: tk.Text, tok: str) -> None:
+    def _append_token(self, tw: tk.Text, renderer: MarkdownRenderer, tok: str) -> None:
+        self._asst_buf += tok
         try:
             tw.config(state="normal")
-            tw.insert("end", tok)
+            tw.delete("1.0", "end")
+            renderer.render(self._asst_buf)
             tw.config(state="disabled")
             self._fit_bubble(tw)
             self._scroll_to_bottom()
@@ -1045,10 +1511,6 @@ class SullybaseApp(tk.Tk):
         try:
             self._chat_meta.messages = list(self._history)
             self._chat_meta.updated  = ChatStore.now_id()
-            if self._chat_meta.title == DEFAULT_CHAT_TITLE and self._history:
-                first = next((m.content for m in self._history if m.role == "user"), "")
-                if first:
-                    self._chat_meta.title = ChatStore.safe_title(first)
             ChatStore.save(self._chat_meta)
             index  = ChatStore.load_index()
             others = [c for c in index.get("chats", [])
@@ -1063,6 +1525,22 @@ class SullybaseApp(tk.Tk):
         except Exception as exc:
             logger.error(f"_persist_chat: {exc}")
 
+    def _request_llm_title(self, user_text: str) -> None:
+        model = self._model_var.get()
+        if not model:
+            return
+
+        def _bg():
+            title = self._client.generate_title(model, user_text)
+            def _update():
+                self._chat_meta.title = title
+                self._persist_chat()
+                self._history_panel.refresh()
+                logger.info(f"Chat title set by LLM: {title!r}")
+            self.after(0, _update)
+
+        threading.Thread(target=_bg, daemon=True, name="gen-title").start()
+
     def _load_chat(self, chat_id: str):
         self._clear_widgets()
         meta = ChatStore.load(chat_id)
@@ -1072,24 +1550,25 @@ class SullybaseApp(tk.Tk):
             for msg in self._history:
                 self._add_bubble(msg.role, msg.content)
             self._status(f'Loaded "{meta.title}"')
+            self._is_first_message = len(self._history) == 0
         else:
             self._history   = []
             self._chat_meta = self._blank_meta(chat_id)
             self._status("Ready")
+            self._is_first_message = True
 
     def _new_chat(self):
         if self._generating:
             messagebox.showwarning("Busy", "Stop generation first.", parent=self)
             return
         self._persist_chat()
-
         new_id = ChatStore.now_id()
         self._chat_id   = new_id
         self._chat_meta = self._blank_meta(new_id)
         self._history.clear()
         self._clear_widgets()
         self._ctx_panel.clear()
-
+        self._is_first_message = True
         self._settings.set("current_chat_id", new_id)
         self._settings.save()
         self._history_panel.refresh()
@@ -1127,15 +1606,31 @@ class SullybaseApp(tk.Tk):
         txt.config(state="disabled")
 
     def _build_messages(self, user_text: str) -> List[dict]:
-        ctx_items = self._ctx_panel.items
-        sys_content = AI_SYSTEM_PROMPT
-        if ctx_items:
-            sys_content += (
-                "\n\nThe following context files are loaded:\n\n"
-                + "\n\n---\n\n".join(cf.text for cf in ctx_items)
-            )
-        msgs = [{"role": "system", "content": sys_content}]
+        """
+        Build the message list to send to Ollama.
+
+        The system prompt is injected only on the very first message of a chat
+        (when self._history is empty). For subsequent messages, the model already
+        has the system instructions in its context window, so we omit it to avoid
+        token bloat.
+        """
+        msgs: List[dict] = []
+
+        # ── System prompt: first message only ────────────────────────────────
+        if not self._history:
+            ctx_items = self._ctx_panel.items
+            sys_content = AI_SYSTEM_PROMPT
+            if ctx_items:
+                sys_content += (
+                    "\n\nThe following context files are loaded:\n\n"
+                    + "\n\n---\n\n".join(cf.text for cf in ctx_items)
+                )
+            msgs.append({"role": "system", "content": sys_content})
+
+        # ── Full conversation history ─────────────────────────────────────────
         msgs += [{"role": m.role, "content": m.content} for m in self._history]
+
+        # ── Current user turn ────────────────────────────────────────────────
         msgs.append({"role": "user", "content": user_text})
         return msgs
 
@@ -1163,7 +1658,13 @@ class SullybaseApp(tk.Tk):
         self._last_user = user_text
         self._input_box.delete("1.0", "end")
         self._add_bubble("user", user_text)
-        self._asst_tw = self._add_bubble("assistant")
+
+        self._asst_tw, self._asst_md = self._add_bubble("assistant")
+        self._asst_buf = ""
+
+        if self._is_first_message:
+            self._is_first_message = False
+            self._request_llm_title(user_text)
 
         self._generating = True
         self._stop_evt.clear()
@@ -1192,8 +1693,8 @@ class SullybaseApp(tk.Tk):
                     break
                 elif isinstance(item, tuple):
                     kind, payload = item
-                    if kind is _TOKEN and self._asst_tw and self._generating:
-                        self._append_token(self._asst_tw, payload)
+                    if kind is _TOKEN and self._asst_tw and self._asst_md and self._generating:
+                        self._append_token(self._asst_tw, self._asst_md, payload)
                     elif kind is _ERROR:
                         self._show_error(payload)
                         break
@@ -1206,7 +1707,9 @@ class SullybaseApp(tk.Tk):
         if not self._generating:
             return
         try:
-            final = self._asst_tw.get("1.0", "end-1c") if self._asst_tw else ""
+            final = self._asst_buf
+            if self._asst_tw:
+                self._asst_tw.config(state="disabled")
             self._history.append(ChatMessage("user",      self._last_user))
             self._history.append(ChatMessage("assistant", final))
             self._persist_chat()
@@ -1223,6 +1726,10 @@ class SullybaseApp(tk.Tk):
 
     def _stop_generation(self):
         self._stop_evt.set()
+        if self._asst_buf:
+            self._history.append(ChatMessage("user",      self._last_user))
+            self._history.append(ChatMessage("assistant", self._asst_buf + " [stopped]"))
+            self._persist_chat()
         self._add_system_note("— generation stopped —")
         self._generating = False
         self._send_btn.enable()
@@ -1231,8 +1738,8 @@ class SullybaseApp(tk.Tk):
 
     def _show_error(self, msg: str):
         try:
-            if self._asst_tw:
-                self._append_token(self._asst_tw, f"\n\n⚠  {msg}")
+            if self._asst_tw and self._asst_md:
+                self._append_token(self._asst_tw, self._asst_md, f"\n\n⚠  {msg}")
             logger.error(f"stream error: {msg}")
         except Exception:
             pass
@@ -1251,8 +1758,6 @@ class SullybaseApp(tk.Tk):
 # ══════════════════════════════════════════════════════════════════════════════
 
 class PathDialog(tk.Toplevel):
-    """Modal dialog for picking a file or folder to load as context."""
-
     def __init__(self, parent):
         super().__init__(parent)
         self.title("Add Context")
@@ -1349,11 +1854,9 @@ class PathDialog(tk.Toplevel):
 
     def _browse(self, mode: str):
         if mode == "file":
-            path = filedialog.askopenfilename(
-                parent=self, title="Select a text file")
+            path = filedialog.askopenfilename(parent=self, title="Select a text file")
         else:
-            path = filedialog.askdirectory(
-                parent=self, title="Select a folder")
+            path = filedialog.askdirectory(parent=self, title="Select a folder")
         if path:
             self._path_var.set(path)
 
