@@ -1,0 +1,84 @@
+Copyright © 2026 Sullydux (GitHub). All rights reserved.  
+Effective Date: June 13, 2026
+
+1. GRANT OF LICENSE
+
+Subject to the terms and conditions of this License, Sullydux grants You a perpetual, worldwide, non-exclusive, non-transferable, free-of-charge license to use, copy, modify, fork, and share the Software, solely for Non-Commercial Purposes as defined below.
+
+2. DEFINITIONS
+
+For the purposes of this License, the following terms shall have the meanings set forth below:
+
+a) "Software" means the copyrighted work, including all source code, object code, documentation, build artifacts, and associated materials provided by Sullydux.
+
+b) "You" or "Your" means any individual or legal entity exercising rights granted under this License.
+
+c) "Non-Commercial Purposes" means use that is not primarily intended for or directed toward commercial advantage, monetary compensation, or financial gain. Non-Commercial Purposes include personal, educational, research, academic, and hobby use.
+
+d) "Commercial Purposes" means any use primarily intended for:
+   i. Commercial advantage or monetary compensation;
+   ii. Sale, licensing, rental, leasing, or distribution for profit;
+   iii. Integration into a commercial product or service offered to third parties;
+   iv. Business operations, internal commercial activities, or professional use.
+
+e) "Derivative Work" means any modified version, fork, adaptation, translation, enhancement, extension, or other work based on the Software.
+
+f) "Sullydux" means the copyright holder, Sullydux (GitHub), unless otherwise explicitly stated.
+
+3. PERMITTED USES
+
+You are expressly permitted to:
+
+a) Use the Software for Non-Commercial Purposes;
+
+b) Copy and share the Software, including linking to its official web page;
+
+c) Modify the Software and create Derivative Works;
+
+d) Fork the Software and distribute forked versions;
+
+e) Distribute the Software or Derivative Works, provided all conditions of this License are met.
+
+4. REQUIREMENTS AND CONDITIONS
+
+In exercising the rights granted above, You must comply with the following conditions:
+
+a) Non-Commercial Use Only: You may not use the Software or any Derivative Work for Commercial Purposes without explicit written permission from Sullydux.
+
+b) Attribution: You must give appropriate credit to Sullydux as the original copyright holder by:
+   i. Including a notice stating "Copyright © 2026 Sullydux (GitHub). All rights reserved." in all copies or substantial portions of the Software;
+   ii. Clearly indicating if You have modified the Software and providing reasonable details of modifications.
+
+c) License Preservation: Any distribution of the Software or Derivative Works must be accompanied by this License in full. You may not impose additional or different license terms that restrict the rights granted herein.
+
+d) No Sublicensing: You may not sublicense the Software to any third party under different terms.
+
+5. NO WARRANTY
+
+The Software is provided "as is", without warranty of any kind, express or implied, including but not limited to the warranties of merchantability, fitness for a particular purpose, noninfringement, or absence of hidden defects or errors. Sullydux does not warrant that the Software will be error-free, or uninterrupted.
+
+6. DISCLAIMER OF LIABILITY
+
+Use of the Software is at Your own risk. To the fullest extent permitted by law, Sullydux shall not be liable for any claim, damages, or other liability, whether in an action of contract, tort, negligence, or otherwise, arising from, out of, or in connection with the Software or the use or other dealings in the Software, including but not limited to:
+
+a) Data loss or corruption;
+
+b) Hardware damage, malfunction, or failure;
+
+c) Software damage, bugs, errors, or failures;
+
+d) Any direct, indirect, incidental, special, exemplary, punitive, or consequential damages.
+
+7. PATENT AND TRADEMARK RIGHTS
+
+This License does not grant You any rights to Sullydux's names or logos, except as expressly stated. You may not use Sullydux's name, this apps name, or logo to endorse or promote Derivative Works without explicit written permission.
+
+8. GENERAL
+
+a) This License constitutes the entire agreement between You and Sullydux regarding the Software.
+
+b) If any provision of this License is held to be invalid, illegal, or unenforceable, the remaining provisions shall remain in full force and effect, and the invalid provision shall be modified to the minimum extent necessary to render it enforceable.
+
+c) This License shall be governed by and construed in accordance with the laws of the United States, without regard to conflict of law principles.
+
+d) Any questions regarding this License or requests for Commercial Use permission should be directed to Sullydux via GitHub.

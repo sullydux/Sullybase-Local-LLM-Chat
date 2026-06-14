@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  
+  <title>Sullybase Local LLM Chat</title>
+  <meta property="og:title" content="Sullybase Local LLM Chat">
+  
+  <link rel="icon" type="image/x-icon" href="Icon.png">
+  <meta property="og:image" content="https://sullydux.github.io/Sullybase-Local-LLM-Chat/Icon.png">
+  
+  <meta name="description" content="A lightweight application for chatting with local LLMs via Ollama. Whether you're online or offline, Sullybase Local LLM Chat gives you full control over your AI conversations with privacy and speed.">
+  <meta property="og:description" content="A lightweight application for chatting with local LLMs via Ollama. Whether you're online or offline, Sullybase Local LLM Chat gives you full control over your AI conversations with privacy and speed.">
+  
+  <meta name="author" content="Sullydux">
+  <meta name="robots" content="index,follow">
+  <link rel="canonical" href="https://sullydux.github.io/Sullybase-Local-LLM-Chat/">
+  <meta property="og:type" content="website">
+  
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Eagle+Lake&display=swap" rel="stylesheet">
+  
+  <style>
+    :root {
+      --panel: rgba(15, 18, 24, 0.88);
+      --line: #262b35;
+      --text: #e9ecf1;
+      --muted: #9fa8bb;
+      --link: #75b7ff;
+      --link-hover: #a5d1ff;
+      --accent-1: #2d7fff;
+      --accent-2: #49b0ff;
+    }
+
+    html, body {
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      background:
+        radial-gradient(circle at 20% 0%, #1c2433 0%, transparent 45%),
+        radial-gradient(circle at 80% 100%, #1a1b2c 0%, transparent 40%),
+        linear-gradient(180deg, #0f1218, #060708);
+      color: var(--text);
+      font-family: "Trebuchet MS", "Segoe UI", Verdana, sans-serif;
+    }
+
+    body {
+      min-height: 100svh;
+    }
+
+    a {
+      color: var(--link);
+      text-decoration: none;
+    }
+
+    a:hover {
+      color: var(--link-hover);
+    }
+
+    a:focus-visible,
+    .download-btn:focus-visible {
+      outline: 2px solid #b8d8ff;
+      outline-offset: 2px;
+      border-radius: 8px;
+    }
+
+    .shell {
+      display: grid;
+      grid-template-rows: 1fr auto;
+      min-height: 100svh;
+    }
+
+    .content-section {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 40px 20px;
+      text-align: center;
+      background: #07090e;
+      border-top: 1px solid #10141c;
+      border-bottom: 1px solid #10141c;
+      overflow-y: auto;
+    }
+
+    .content-wrapper {
+      max-width: 700px;
+      width: 100%;
+    }
+
+    .game-name {
+      font-size: 3.5rem;
+      font-family: "Eagle Lake";
+      font-weight: 400;
+      color: var(--text);
+      text-shadow: 0 2px 12px rgba(0, 0, 0, 0.55);
+      margin: 20px 0 0 0;
+    }
+
+    .game-system {
+      font-size: 2rem;
+      font-family: "Eagle Lake";
+      font-weight: 400;
+      color: var(--text);
+      text-shadow: 0 2px 12px rgba(0, 0, 0, 0.55);
+      margin: 20px 0 0 0;
+    }
+
+    .game-icon {
+      width: 200px;
+      height: 200px;
+      image-rendering: pixelated;
+      margin-bottom: 10px;
+    }
+
+    .info-section {
+      margin-bottom: 24px;
+      text-align: left;
+      background: rgba(8, 15, 28, 0.6);
+      border: 1px solid rgba(104, 150, 218, 0.24);
+      border-radius: 12px;
+      padding: 24px;
+      line-height: 1.7;
+      color: #dfe8f6;
+    }
+
+    .info-title {
+      font-size: 1.1rem;
+      font-weight: 700;
+      margin: 0 0 12px 0;
+      color: var(--accent-2);
+    }
+
+    .info-text {
+      margin: 0;
+      font-size: 0.95rem;
+    }
+
+    code {
+      background: rgba(12, 18, 36, 0.6);
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-family: "Segoe UI", monospace;
+      font-size: 0.9rem;
+    }
+
+    .download-section {
+      margin-top: 20px;
+      display: flex;
+      gap: 16px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+
+    .download-label {
+      display: block;
+      font-size: 0.95rem;
+      color: var(--muted);
+      margin-bottom: 12px;
+    }
+
+    footer {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      gap: 8px;
+      background: var(--panel);
+      border-top: 1px solid var(--line);
+      padding: 10px 12px max(10px, env(safe-area-inset-bottom));
+      box-sizing: border-box;
+    }
+
+    .footer-line {
+      margin: 0;
+      font-size: 0.86rem;
+      line-height: 1.35;
+      color: var(--muted);
+      max-width: 1200px;
+    }
+
+    .download-btn {
+      display: inline-block;
+      padding: 8px 14px;
+      border-radius: 999px;
+      background: linear-gradient(135deg, var(--accent-1), var(--accent-2));
+      color: #fff;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      text-decoration: none;
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      box-shadow: 0 8px 20px rgba(12, 18, 36, 0.45);
+      transition: transform 0.2s ease, filter 0.2s ease;
+    }
+
+    .download-btn:hover {
+      transform: translateY(-1px);
+      filter: brightness(1.08);
+    }
+
+    @media (max-width: 900px) {
+      .footer-line {
+        font-size: 0.8rem;
+      }
+    }
+
+    @media (max-width: 640px) {
+      footer {
+        gap: 7px;
+        padding-top: 9px;
+      }
+      
+      .download-section {
+        flex-direction: column;
+        align-items: center;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <section class="content-section" aria-label="Download Sullybase Local LLM Chat">
+      <div class="content-wrapper">
+        <img class="game-icon" src="Icon.png" alt="Sullybase Local LLM Chat app icon">
+        <h1 class="game-name">Sullybase Local LLM Chat</h1>
+        <h1 class="game-system">Chat with Local LLMs via Ollama</h1>
+
+        <div class="info-section">
+          <p class="info-text">
+            A lightweight application for chatting with local LLMs via <strong>Ollama</strong>. Whether you're online or offline, Sullybase Local LLM Chat gives you full control over your AI conversations with privacy and speed. All conversations stay on your device—no external data transmission.
+          </p>
+        </div>
+
+        <div class="info-section">
+          <h2 class="info-title">Important Setup Notes</h2>
+          <p class="info-text">
+            <strong>For Python:</strong> You need to install the dependencies. Run <code>pip install -r requirements.txt</code> after downloading.
+          </p>
+          <p class="info-text" style="margin-top: 12px;">
+            <strong>For MacOS:</strong> You need to bypass Gatekeeper because I am unable to pay for app signing. The app will warn about malware scanning—click "Done," then go to <strong>System Settings → Privacy & Security</strong> and click "Open Anyway" when you see the blocked app message.
+          </p>
+        </div>
+
+        <div class="download-section">
+          <span class="download-label">Choose your download:</span>
+          <a class="download-btn" href="Sullybase Local LLM Chat Mac.zip" download="Sullybase Local LLM Chat.dmg">
+            Download for MacOS
+          </a>
+          <a class="download-btn" href="Sullybase Local LLM Chat Python.zip" download="Sullybase Local LLM Chat Python.zip">
+            Download Python
+          </a>
+        </div>
+      </div>
+    </section>
+
+    <footer>
+      <div class="footer-line">
+        <a href="https://github.com/sullydux/Sullybase-Local-LLM-Chat" target="_blank" rel="noopener">Read Me & Source Code</a>
+        |
+        <a href="https://sullydux.github.io/sullydux/" target="_blank" rel="noopener">My other projects</a>
+      </div>
+    </footer>
+  </main>
+</body>
+</html>

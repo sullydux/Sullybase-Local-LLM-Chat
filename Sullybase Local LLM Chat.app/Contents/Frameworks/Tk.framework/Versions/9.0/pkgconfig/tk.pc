@@ -1,0 +1,16 @@
+# tk pkg-config source file
+
+prefix=/usr/local
+exec_prefix=/usr/local
+libdir=/Frameworks/Tk.framework/Versions/${VERSION}
+includedir=/Frameworks/Tk.framework/Versions/${VERSION}/Headers
+demodir=/Frameworks/Tk.framework/Versions/9.0/Resources/Scripts/demos
+
+Name: The Tk Toolkit
+Description: Tk is a cross-platform graphical user interface toolkit, the standard GUI not only for Tcl, but for many other dynamic languages as well.
+URL: https://www.tcl-lang.org/
+Version: 9.0.3
+Requires: tcl >= 8.6
+Libs: -L${libdir} -framework Tk -ltkstub
+Libs.private:  
+Cflags: -I${includedir}
