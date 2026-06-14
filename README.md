@@ -71,10 +71,12 @@ Sullybase is primarily built for macOS. To run on Windows:
 
 ---
 
-## Future Updates
+## Future Updates (not in order)
 
 - **Markdown Chat Interface**: Cleaner, formatted rendering of codeblocks, equations, and tables  
 - **Gemini API Support**: Optional cloud with Gemini API, you will need your own keys  
+- **Chat Names**: The AI will name every chat
+- **Website Control**: Run the AI on device and use WiFi to conttrol it with Iphone
 
 ---
 
