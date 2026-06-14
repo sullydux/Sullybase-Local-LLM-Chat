@@ -2,9 +2,9 @@
 <img src="Icon.png" alt="Sullybase Icon" style="float: left; margin-right: 15px; width: 240px; height: 240px;">
 </div>
 
----
 <div align="center">
-# [Sullybase Local LLM Chat](https://sullydux.github.io/Sullybase-Local-LLM-Chat/) 
+
+[Sullybase Local LLM Chat](https://sullydux.github.io/Sullybase-Local-LLM-Chat/) 
 v1.1.0
 </div>
 
