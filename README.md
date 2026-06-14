@@ -75,6 +75,7 @@ Sullybase is primarily built for macOS. To run on Windows:
 - **AI-Assisted Development**: The Python scripts were coded with AI assistance  
 - **Bundling**: The app was bundled using `py2app`  
 - **Privacy**: All conversations stay on your device—no external data transmission  
+- **Scrolling**: If it doesn't scroll correctly or at all use the scroll bar
 
 ---
 
@@ -83,6 +84,15 @@ Sullybase is primarily built for macOS. To run on Windows:
 - **Gemini API Support**: Optional cloud with Gemini API, you will need your own keys  
 - **Website Control**: Run the AI on device and use WiFi to conttrol it with Iphone
 - **Agentic Mode**: Allow user to add files to a folder and the AI will code them 
+- **Stats**: It will show a conversations tokens, speeds, and more
+
+---
+
+## Model Support
+
+I made and use this on a Apple M2 air with 8GB RAM, so I only use and test lesser models. I run qwen2.5-coder:3b and llama3.2:3b-instruct-q6_k with the qwen as the faster model.
+
+Besides those facts if you have enough RAM, SSD, and processing power anything on Ollama as a local model should run.
 
 ---
 
