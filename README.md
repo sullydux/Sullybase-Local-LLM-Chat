@@ -81,8 +81,8 @@ Sullybase is primarily built for macOS. To run on Windows:
 ## Future Updates (not in order)
 
 - **Gemini API Support**: Optional cloud with Gemini API, you will need your own keys  
-- **Chat Names**: The AI will name every chat
 - **Website Control**: Run the AI on device and use WiFi to conttrol it with Iphone
+- **Agentic Mode**: Allow user to add files to a folder and the AI will code them 
 
 ---
 
