@@ -1,4 +1,6 @@
+<div align="center">
 <img src="Icon.png" alt="Sullybase Icon" style="float: left; margin-right: 15px; width: 80px; height: 80px;">
+</div>
 
 # Sullybase Local LLM Chat
 
