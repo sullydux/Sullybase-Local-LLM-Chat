@@ -34,6 +34,7 @@
       --accent-2: #49b0ff;
     }
 
+
     html, body {
       height: 100%;
       margin: 0;
@@ -46,18 +47,22 @@
       font-family: "Trebuchet MS", "Segoe UI", Verdana, sans-serif;
     }
 
+
     body {
       min-height: 100svh;
     }
+
 
     a {
       color: var(--link);
       text-decoration: none;
     }
 
+
     a:hover {
       color: var(--link-hover);
     }
+
 
     a:focus-visible,
     .download-btn:focus-visible {
@@ -66,11 +71,13 @@
       border-radius: 8px;
     }
 
+
     .shell {
       display: grid;
       grid-template-rows: 1fr auto;
       min-height: 100svh;
     }
+
 
     .content-section {
       flex: 1;
@@ -86,10 +93,12 @@
       overflow-y: auto;
     }
 
+
     .content-wrapper {
       max-width: 700px;
       width: 100%;
     }
+
 
     .game-name {
       font-size: 3.5rem;
@@ -100,6 +109,7 @@
       margin: 20px 0 0 0;
     }
 
+
     .game-system {
       font-size: 2rem;
       font-family: "Eagle Lake";
@@ -109,12 +119,14 @@
       margin: 20px 0 0 0;
     }
 
+
     .game-icon {
       width: 200px;
       height: 200px;
       image-rendering: pixelated;
       margin-bottom: 10px;
     }
+
 
     .info-section {
       margin-bottom: 24px;
@@ -127,6 +139,7 @@
       color: #dfe8f6;
     }
 
+
     .info-title {
       font-size: 1.1rem;
       font-weight: 700;
@@ -134,10 +147,12 @@
       color: var(--accent-2);
     }
 
+
     .info-text {
       margin: 0;
       font-size: 0.95rem;
     }
+
 
     code {
       background: rgba(12, 18, 36, 0.6);
@@ -147,6 +162,7 @@
       font-size: 0.9rem;
     }
 
+
     .download-section {
       margin-top: 20px;
       display: flex;
@@ -155,12 +171,14 @@
       flex-wrap: wrap;
     }
 
+
     .download-label {
       display: block;
       font-size: 0.95rem;
       color: var(--muted);
       margin-bottom: 12px;
     }
+
 
     footer {
       display: flex;
@@ -175,6 +193,7 @@
       box-sizing: border-box;
     }
 
+
     .footer-line {
       margin: 0;
       font-size: 0.86rem;
@@ -182,6 +201,7 @@
       color: var(--muted);
       max-width: 1200px;
     }
+
 
     .download-btn {
       display: inline-block;
@@ -197,16 +217,19 @@
       transition: transform 0.2s ease, filter 0.2s ease;
     }
 
+
     .download-btn:hover {
       transform: translateY(-1px);
       filter: brightness(1.08);
     }
+
 
     @media (max-width: 900px) {
       .footer-line {
         font-size: 0.8rem;
       }
     }
+
 
     @media (max-width: 640px) {
       footer {
@@ -219,6 +242,33 @@
         align-items: center;
       }
     }
+
+    /* Smooth scrolling enhancement */
+    html {
+      scroll-behavior: smooth;
+    }
+
+    .content-section {
+      scrollbar-width: thin;
+      scrollbar-color: var(--accent-1) transparent;
+    }
+
+    .content-section::-webkit-scrollbar {
+      width: 8px;
+    }
+
+    .content-section::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    .content-section::-webkit-scrollbar-thumb {
+      background: var(--accent-1);
+      border-radius: 4px;
+    }
+
+    .content-section::-webkit-scrollbar-thumb:hover {
+      background: var(--accent-2);
+    }
   </style>
 </head>
 <body>
@@ -229,11 +279,13 @@
         <h1 class="game-name">Sullybase Local LLM Chat</h1>
         <h1 class="game-system">Chat with Local LLMs via Ollama</h1>
 
+
         <div class="info-section">
           <p class="info-text">
             A lightweight application for chatting with local LLMs via <strong>Ollama</strong>. Whether you're online or offline, Sullybase Local LLM Chat gives you full control over your AI conversations with privacy and speed. All conversations stay on your device—no external data transmission.
           </p>
         </div>
+
 
         <div class="info-section">
           <h2 class="info-title">Important Setup Notes</h2>
@@ -244,6 +296,7 @@
             <strong>For MacOS:</strong> You need to bypass Gatekeeper because I am unable to pay for app signing. The app will warn about malware scanning—click "Done," then go to <strong>System Settings → Privacy & Security</strong> and click "Open Anyway" when you see the blocked app message.
           </p>
         </div>
+
 
         <div class="download-section">
           <span class="download-label">Choose your download:</span>
@@ -256,6 +309,7 @@
         </div>
       </div>
     </section>
+
 
     <footer>
       <div class="footer-line">
