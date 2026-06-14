@@ -5,6 +5,7 @@
 <div align="center">
 
 [Sullybase Local LLM Chat](https://sullydux.github.io/Sullybase-Local-LLM-Chat/) 
+
 v1.1.0
 </div>
 
