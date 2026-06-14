@@ -85,12 +85,13 @@ Sullybase is primarily built for macOS. To run on Windows:
 - **Website Control**: Run the AI on device and use WiFi to conttrol it with Iphone
 - **Agentic Mode**: Allow user to add files to a folder and the AI will code them 
 - **Stats**: It will show a conversations tokens, speeds, and more
+- **Memory**: Make sure context files are accesible to AI in every reply in a conversation.
 
 ---
 
 ## Model Support
 
-I made and use this on a Apple M2 air with 8GB RAM, so I only use and test lesser models. I run qwen2.5-coder:3b and llama3.2:3b-instruct-q6_k with the qwen as the faster model.
+I made and use this on a Apple M2 air with 8GB RAM, so I only use and test lesser models. I run qwen2.5-coder:3b and it works great.
 
 Besides those facts if you have enough RAM, SSD, and processing power anything on Ollama as a local model should run.
 
