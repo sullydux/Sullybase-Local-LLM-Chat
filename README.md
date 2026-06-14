@@ -9,7 +9,9 @@
 v1.1.0
 </div>
 
-A lightweight application for chatting with local LLMs via **Ollama**. Whether you're online or offline, Sullybase Local LLM Chat gives you full control over your AI conversations with privacy and speed.
+A lightweight application for chatting with local LLMs via **Ollama**. Whether you're online or offline, Sullybase Local LLM Chat gives you full control over your AI conversations with privacy.
+
+[Download App](https://github.com/sullydux/Sullybase-Local-LLM-Chat/releases)
 
 ---
 
