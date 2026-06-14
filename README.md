@@ -1,8 +1,8 @@
 <div align="center">
-<img src="Icon.png" alt="Sullybase Icon" style="float: left; margin-right: 15px; width: 80px; height: 80px;">
+<img src="Icon.png" alt="Sullybase Icon" style="float: left; margin-right: 15px; width: 240px; height: 240px;">
 </div>
 
-# Sullybase Local LLM Chat
+# [Sullybase Local LLM Chat](https://sullydux.github.io/Sullybase-Local-LLM-Chat/)
 
 A lightweight application for chatting with local LLMs via **Ollama**. Whether you're online or offline, Sullybase Local LLM Chat gives you full control over your AI conversations with privacy and speed.
 
@@ -97,5 +97,5 @@ This project is licensed under this [License](https://github.com/sullydux/Sullyb
 ---
 
 <div align="center">
-  Copyright © 2026 <strong>Sullydux</strong> [on GitHub](https://github.com/sullydux/Sullybase-Local-LLM-Chat)
+  Copyright © 2026 <strong>Sullydux</strong> on GitHub
 </div>
