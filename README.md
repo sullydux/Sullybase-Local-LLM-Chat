@@ -33,7 +33,7 @@ A lightweight application for chatting with local LLMs via **Ollama**. Whether y
 
 ### Quick Start (macOS)
 
-1. **Download** one of the following:
+1. **Download** one of the following or clone the repository to you computer:
    - **Bundled App** (`.app` file)  
    - **Python Script** (`.py` file) — requires Python and dependencies
 
