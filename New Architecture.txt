@@ -1,0 +1,105 @@
+Sullybase Local LLM Chat — New Architecture For Upcoming Release
+
+HOW IT WILL WORK
+────────────────────────────────────────────────────────────────
+app.py starts the app. It spins up Flask on a background thread
+then opens a pywebview window pointed at localhost:5050. To the
+user it looks and feels like a native desktop app — no browser,
+no tabs, no address bar.
+
+Flask runs silently in the background. It serves index.html,
+app.js, and style.css as static files. It also exposes API
+endpoints that the frontend calls via fetch().
+
+When the user sends a message, JS POSTs to /api/chat. Flask
+builds the message history, attaches any context files, and
+opens a streaming connection to Ollama. Tokens come back from
+Ollama and are forwarded to the browser via Server-Sent Events
+(SSE). JS receives each token, appends it to the chat bubble,
+and renders markdown when the stream finishes.
+
+Chat history, settings, and context files are all handled by
+Flask on the Python side and persisted to the Application
+Support folder.
+
+
+FOLDER STRUCTURE
+────────────────────────────────────────────────────────────────
+sullybase/
+├── app.py          ← launches pywebview window + Flask thread
+├── server.py       ← Flask app, Ollama proxy, chat persistence
+├── index.html      ← the entire UI (served as static file)
+├── app.js          ← chat logic, SSE streaming, markdown render
+├── style.css       ← all styling
+└── app.icns        ← app icon (macOS .icns)
+
+~/Library/Application Support/Sullybase-LLM-Chat/   ← created at runtime
+├── settings.json
+├── chat_index.json
+├── logs/
+│   └── sullybase.log
+└── chats/
+    └── *.json
+
+
+WHAT EACH FILE DOES
+────────────────────────────────────────────────────────────────
+app.py
+  Starts Flask on a background daemon thread.
+  Waits briefly for Flask to be ready.
+  Calls webview.create_window() pointing at localhost:5050.
+  Passes app.icns as the window icon.
+  Blocks on webview.start() until the user closes the window.
+
+server.py
+  Flask app with these endpoints:
+    GET  /              → serves index.html
+    GET  /api/models    → lists Ollama models
+    GET  /api/ps        → VRAM / device stats from Ollama
+    POST /api/chat      → streams tokens via SSE
+    POST /api/title     → generates chat title (thinking-safe)
+    GET  /api/chats     → returns chat index
+    GET  /api/chats/<id>→ returns a single chat
+    POST /api/chats/<id>→ saves a chat
+    DELETE /api/chats/<id> → deletes a chat
+    GET  /api/settings  → returns settings.json
+    POST /api/settings  → saves settings.json
+    POST /api/context   → reads a file or folder, returns text
+
+index.html
+  Single HTML file. Imports app.js and style.css.
+  Defines the full layout: sidebar, chat area, input bar,
+  stats bar. No framework — plain HTML.
+
+app.js
+  All frontend logic:
+    - fetch() calls to the Flask API
+    - EventSource for SSE token streaming
+    - marked.js for markdown rendering
+    - highlight.js for syntax highlighting
+    - Copy buttons on code blocks
+    - Chat history UI, model switcher, context file panel
+    - Stats bar updates
+    - Thinking model <think> block rendering
+
+style.css
+  All styling. Same dark colour palette as the current app.
+  Proper CSS — no Tkinter hacks needed.
+
+app.icns
+  macOS app icon. Passed to webview.create_window() so the
+  app shows the correct icon in the dock and title bar.
+
+~/Library/Application Support/Sullybase-LLM-Chat/
+  Created automatically on first run. Mirrors the same
+  structure as the current Tkinter app so existing chat
+  history, settings, and logs carry over with no migration.
+  On Windows: %APPDATA%/Sullybase-LLM-Chat/
+  On Linux:   ~/.config/Sullybase-LLM-Chat/
+
+
+DEPENDENCIES
+────────────────────────────────────────────────────────────────
+pip install flask pywebview requests
+
+Ollama must be running separately (ollama serve).

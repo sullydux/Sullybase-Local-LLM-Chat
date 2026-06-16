@@ -6,7 +6,7 @@
 
 # [Sullybase Local LLM Chat](https://sullydux.github.io/Sullybase-Local-LLM-Chat/) 
 
-v1.1.0
+v1.2.0
 </div>
 
 A lightweight application for chatting with local LLMs via **Ollama**. Whether you're online or offline, Sullybase Local LLM Chat gives you full control over your AI conversations with privacy.
@@ -76,16 +76,17 @@ Sullybase is primarily built for macOS. To run on Windows:
 - **Bundling**: The app was bundled using `py2app`  
 - **Privacy**: All conversations stay on your device—no external data transmission  
 - **Scrolling**: If it doesn't scroll correctly or at all use the scroll bar
+- **Thinking Models**: It wont show their thinking so you just have to wait
 
 ---
 
-## Future Updates (not in order)
+## Future Updates
 
-- **Gemini API Support**: Optional cloud with Gemini API, you will need your own keys  
-- **Website Control**: Run the AI on device and use WiFi to conttrol it with Iphone
+- **Frontend**: Possible swich to html, js, and some python to get away from issues with scrolling and other stuff
+  - New Architecture.txt is my plan
+- **Gemini API Support**: Optional cloud with Gemini API, you will need your own keys
 - **Agentic Mode**: Allow user to add files to a folder and the AI will code them 
-- **Stats**: It will show a conversations tokens, speeds, and more
-- **Memory**: Make sure context files are accesible to AI in every reply in a conversation.
+- **Website Control**: Run the AI on device and use WiFi to conttrol it with Iphone
 
 ---
 

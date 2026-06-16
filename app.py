@@ -13,6 +13,7 @@ import queue
 import re
 import sys
 import threading
+import time
 import traceback
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
@@ -35,14 +36,12 @@ from tkinter import filedialog, messagebox, ttk
 
 APP_NAME    = "Sullybase Local LLM Chat"
 APP_BUNDLE  = "Sullybase-LLM-Chat"
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.2.0"
 
 AI_SYSTEM_PROMPT = (
-    "You are a Local LLM from Ollama, a helpful assistant. "
-    "This application is Sullybase Local LLM Chat. "
+    "You are a Local LLM, a helpful assistant. "
     "You assist with coding, science, and general questions. "
-    "Be clear, concise, and technically accurate.\n\n"
-    "This front end is Copyright © 2026 Sullydux (GitHub). All rights reserved. Effective Date: June 13, 2026\n\n"
+    "Be clear, concise, and technically accurate."
     "You have full Markdown rendering support in this chat. Use it freely:\n"
     "• **bold**, *italic*, ~~strikethrough~~, `inline code`\n"
     "• # Heading 1 / ## Heading 2 / ### Heading 3\n"
@@ -53,7 +52,7 @@ AI_SYSTEM_PROMPT = (
     "• | Tables | with | headers |\n"
     "• [Link text](https://url) and bare URLs\n"
     "• --- Horizontal rules\n\n"
-    "Always use appropriate Markdown to make responses clear and readable."
+    "Always use appropriate Markdown to make responses clear and readable. Markdown is auto applied so DO NOT USE ```markdown"
 )
 
 # ── Palette ──────────────────────────────────────────────────────────────────
@@ -73,11 +72,12 @@ BG_BTN_NEW    = "#1e3a2e"
 BG_BTN_NEW_H  = "#25503d"
 BG_PATH_OK    = "#1e2e1e"
 BG_PATH_BAD   = "#2e1e1e"
-BG_CODE       = "#0d1117"   # code block background (GitHub-dark style)
-BG_BLOCKQUOTE = "#1e2433"   # blockquote background
-BG_TABLE_HDR  = "#1a2a3a"   # table header background
-BG_TABLE_ROW  = "#1e1e1e"   # table row background
-BG_TABLE_ALT  = "#222222"   # alternating table row
+BG_CODE       = "#0d1117"
+BG_BLOCKQUOTE = "#1e2433"
+BG_TABLE_HDR  = "#1a2a3a"
+BG_TABLE_ROW  = "#1e1e1e"
+BG_TABLE_ALT  = "#222222"
+BG_STATS      = "#111111"
 
 FG_PRIMARY  = "#e8e8e8"
 FG_DIM      = "#888888"
@@ -88,19 +88,24 @@ FG_ASST     = "#e8e8e8"
 FG_BADGE    = "#7ab87a"
 FG_PATH_OK  = "#7ab87a"
 FG_PATH_BAD = "#e07070"
-FG_CODE     = "#c9d1d9"    # code text
-FG_LINK     = "#58a6ff"    # URL colour
-FG_STRIKE   = "#888888"    # strikethrough text
-FG_BLOCKQUOTE = "#aaaaaa"  # blockquote text
-FG_TABLE_HDR  = "#4ec994"  # table header text
+FG_CODE     = "#c9d1d9"
+FG_LINK     = "#58a6ff"
+FG_STRIKE   = "#888888"
+FG_BLOCKQUOTE = "#aaaaaa"
+FG_TABLE_HDR  = "#4ec994"
+FG_STATS_VAL  = "#d0d0d0"
+FG_STATS_LBL  = "#555555"
+FG_STATS_GOOD = "#4ec994"
+FG_STATS_WARN = "#d4a843"
+FG_STATS_BAD  = "#e07070"
 
-# ── Syntax highlight colours (minimal, readable on dark) ─────────────────────
-SH_KEYWORD  = "#ff7b72"   # red  – keywords
-SH_STRING   = "#a5d6ff"   # blue – strings
-SH_COMMENT  = "#8b949e"   # grey – comments
-SH_NUMBER   = "#f2cc60"   # gold – numbers
-SH_FUNC     = "#d2a8ff"   # purple – functions/decorators
-SH_BUILTIN  = "#ffa657"   # orange – builtins / types
+# ── Syntax highlight colours ──────────────────────────────────────────────────
+SH_KEYWORD  = "#ff7b72"
+SH_STRING   = "#a5d6ff"
+SH_COMMENT  = "#8b949e"
+SH_NUMBER   = "#f2cc60"
+SH_FUNC     = "#d2a8ff"
+SH_BUILTIN  = "#ffa657"
 SH_DEFAULT  = FG_CODE
 
 # ── Fonts ────────────────────────────────────────────────────────────────────
@@ -109,6 +114,8 @@ FONT_SM   = ("SF Pro Display", 10)
 FONT_MONO = ("SF Mono", 11)
 FONT_LBL  = ("SF Pro Display", 10)
 FONT_BOLD = ("SF Pro Display", 11, "bold")
+FONT_STATS = ("SF Mono", 9)
+FONT_STATS_LBL = ("SF Pro Display", 9)
 
 # ── Limits & tuning ──────────────────────────────────────────────────────────
 OLLAMA_BASE          = "http://localhost:11434"
@@ -117,9 +124,11 @@ OLLAMA_TITLE_TIMEOUT = (10, 30)
 MAX_FILE_SIZE        = 2 * 1024 * 1024
 NETWORK_RETRIES      = 3
 NETWORK_RETRY_DELAY  = 1.0
-DRAIN_INTERVAL_MS    = 30
+DRAIN_INTERVAL_MS    = 50
+STATS_POLL_MS        = 2000   # idle poll: every 2 s
+STATS_POLL_GEN_MS    = 800    # active-generation poll: every 0.8 s
 DEFAULT_CHAT_TITLE   = "New chat"
-MAX_TITLE_LEN        = 20
+MAX_TITLE_LEN        = 25
 
 # ── File exclusions ───────────────────────────────────────────────────────────
 EXCLUDED_NAMES: set = {
@@ -163,10 +172,10 @@ _SH_RULES: Dict[str, List[Tuple[str, str]]] = {
         (r"\b\d+\.?\d*\b", SH_NUMBER),
         (r"\b(console|document|window|Math|Array|Object|String|Number|Boolean|Promise|fetch)\b", SH_BUILTIN),
     ],
-    "typescript": [],  # will fall through to javascript rules
+    "typescript": [],
     "bash": [
         (r"\b(if|then|else|elif|fi|for|do|done|while|case|esac|function|in|echo|exit|return|local|export|source)\b", SH_KEYWORD),
-        (r'"[^"\\]*(?:\\.[^"\\]*)*"|\'[^\'\\]*\'', SH_STRING),
+        (r'"[^"\\]*(?:\\.[^"\\]*)*"|\'[^\']*\'', SH_STRING),
         (r"#[^\n]*", SH_COMMENT),
         (r"\$\w+|\$\{[^}]+\}", SH_FUNC),
         (r"\b\d+\b", SH_NUMBER),
@@ -224,7 +233,6 @@ _SH_RULES: Dict[str, List[Tuple[str, str]]] = {
         (r"\b-?\d+\.?\d*\b", SH_NUMBER),
     ],
 }
-# aliases
 _SH_RULES["js"] = _SH_RULES["javascript"]
 _SH_RULES["ts"] = _SH_RULES["javascript"]
 _SH_RULES["typescript"] = _SH_RULES["javascript"]
@@ -298,6 +306,7 @@ class ChatMessage:
 class ContextFile:
     label: str
     text:  str
+    path:  Optional[Path] = None   # source path — used to re-read on every send
 
 
 @dataclass
@@ -326,6 +335,52 @@ class ChatMeta:
             updated=d.get("updated", ""),
             messages=[ChatMessage.from_dict(m) for m in d.get("messages", [])],
         )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  Generation stats container
+# ══════════════════════════════════════════════════════════════════════════════
+
+@dataclass
+class GenStats:
+    """Tracks per-response and session-level generation metrics."""
+    response_tokens:  int   = 0
+    time_to_first:    float = 0.0
+    total_gen_time:   float = 0.0
+    tokens_per_sec:   float = 0.0
+
+    session_prompt_tokens:     int = 0
+    session_completion_tokens: int = 0
+
+    vram_used_mb:   int = 0
+    vram_free_mb:   int = 0
+    vram_total_mb:  int = 0
+    context_size:   int = 0
+    context_used:   int = 0
+    device:         str = ""
+    num_threads:    int = 0
+
+    def reset_response(self):
+        self.response_tokens = 0
+        self.time_to_first   = 0.0
+        self.total_gen_time  = 0.0
+        self.tokens_per_sec  = 0.0
+
+    @property
+    def session_total_tokens(self) -> int:
+        return self.session_prompt_tokens + self.session_completion_tokens
+
+    @property
+    def vram_used_pct(self) -> float:
+        if self.vram_total_mb <= 0:
+            return 0.0
+        return self.vram_used_mb / self.vram_total_mb
+
+    @property
+    def context_fill_pct(self) -> float:
+        if self.context_size <= 0:
+            return 0.0
+        return min(1.0, self.context_used / self.context_size)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -436,11 +491,15 @@ def load_context_path(raw: str) -> List[ContextFile]:
         if _is_excluded(p):
             raise ValueError(f"Excluded file: {p.name}")
         if not _is_text(p):
-            raise ValueError(f"Not a text file: {p.name}")
+            raise ValueError(f"Not a text file: {p.suffix or '(no ext)'}")
         text = _read_text(p)
         if text is None:
             raise IOError(f"Could not read: {p.name}")
-        return [ContextFile(label=f"📄 {p.name}  ({len(text):,} chars)", text=text)]
+        return [ContextFile(
+            label=f"📄 {p.name}  ({len(text):,} chars)",
+            text=text,
+            path=p,
+        )]
     if p.is_dir():
         results: List[ContextFile] = []
         for child in sorted(p.rglob("*")):
@@ -460,6 +519,7 @@ def load_context_path(raw: str) -> List[ContextFile]:
             results.append(ContextFile(
                 label=f"📄 {rel}  ({len(text):,} chars)",
                 text=f"### {rel}\n{text}",
+                path=child,
             ))
         if not results:
             raise ValueError("No readable text files found in folder.")
@@ -570,11 +630,88 @@ class OllamaClient:
                 return []
         return []
 
+    def get_model_info(self, model: str) -> dict:
+        result = {
+            "context_length": 0,
+            "num_gpu":        0,
+            "num_thread":     0,
+            "quantization":   "",
+        }
+        if not model:
+            return result
+        try:
+            r = self._session.post(
+                f"{self.base_url}/api/show",
+                json={"name": model},
+                timeout=10,
+            )
+            r.raise_for_status()
+            data = r.json()
+
+            model_info = data.get("model_info", {})
+            for key in model_info:
+                if "context_length" in key:
+                    result["context_length"] = int(model_info[key])
+                    break
+
+            details = data.get("details", {})
+            result["quantization"] = details.get("quantization_level", "")
+
+            params = data.get("parameters", "")
+            if isinstance(params, str):
+                for line in params.splitlines():
+                    parts = line.split()
+                    if len(parts) >= 2:
+                        if parts[0] == "num_gpu":
+                            result["num_gpu"] = int(parts[1])
+                        elif parts[0] == "num_thread":
+                            result["num_thread"] = int(parts[1])
+
+        except Exception as exc:
+            logger.debug(f"get_model_info: {exc}")
+        return result
+
+    def get_ps_info(self) -> dict:
+        result = {"vram_used_mb": 0, "vram_free_mb": 0, "vram_total_mb": 0, "device": ""}
+        try:
+            r = self._session.get(f"{self.base_url}/api/ps", timeout=5)
+            r.raise_for_status()
+            data = r.json()
+            models_list = data.get("models", [])
+            if not models_list:
+                return result
+
+            m = models_list[0]
+            size_vram = m.get("size_vram", 0)
+            result["vram_used_mb"] = size_vram // (1024 * 1024)
+
+            details = m.get("details", {})
+            num_gpu_layers = details.get("num_gpu_layers", -1)
+
+            if num_gpu_layers == 0:
+                result["device"] = "CPU"
+            elif num_gpu_layers > 0 or size_vram > 0:
+                result["device"] = "GPU"
+            else:
+                result["device"] = "CPU"
+
+            gpu_info = data.get("gpu_info", [])
+            if gpu_info:
+                total = sum(g.get("total_memory", 0) for g in gpu_info)
+                free  = sum(g.get("free_memory",  0) for g in gpu_info)
+                result["vram_total_mb"] = total // (1024 * 1024)
+                result["vram_free_mb"]  = free  // (1024 * 1024)
+
+        except Exception as exc:
+            logger.debug(f"get_ps_info: {exc}")
+        return result
+
     def generate_title(self, model: str, user_text: str) -> str:
         prompt = (
             f"In {MAX_TITLE_LEN} characters or fewer, write a short title that "
             f"summarises this message. Reply with ONLY the title text — no quotes, "
-            f"no punctuation at the end, no extra words.\n\nMessage: {user_text[:400]}"
+            f"no punctuation at the end, no extra words. Do NOT include any reasoning "
+            f"or thinking tags.\n\nMessage: {user_text[:400]}"
         )
         try:
             resp = self._session.post(
@@ -588,7 +725,13 @@ class OllamaClient:
             )
             resp.raise_for_status()
             raw = resp.json().get("message", {}).get("content", "").strip()
-            raw = raw.strip('"\'')
+            # Strip thinking-model <think>...</think> blocks (DeepSeek, QwQ, etc.)
+            raw = re.sub(r"<think>[\s\S]*?</think>", "", raw, flags=re.IGNORECASE).strip()
+            # Also strip any residual <think> tags left open
+            raw = re.sub(r"</?think[^>]*>", "", raw, flags=re.IGNORECASE).strip()
+            raw = raw.strip('"\'').strip()
+            # Take only the first line if multiline
+            raw = raw.splitlines()[0].strip() if raw else ""
             if len(raw) > MAX_TITLE_LEN:
                 raw = raw[:MAX_TITLE_LEN].rstrip()
             return raw or DEFAULT_CHAT_TITLE
@@ -604,6 +747,7 @@ class OllamaClient:
         on_token,
         on_done,
         on_error,
+        on_eval_count=None,
     ) -> threading.Thread:
         def _run():
             try:
@@ -617,6 +761,7 @@ class OllamaClient:
                     on_error(f"Model '{model}' not found. Run: ollama pull {model}")
                     return
                 resp.raise_for_status()
+
                 for raw in resp.iter_lines():
                     if stop_event.is_set():
                         break
@@ -626,12 +771,24 @@ class OllamaClient:
                         data = json.loads(raw)
                     except json.JSONDecodeError:
                         continue
+
                     tok = data.get("message", {}).get("content", "")
                     if tok:
                         on_token(tok)
+
                     if data.get("done"):
-                        break
+                        # Capture final eval counts from the done chunk
+                        if on_eval_count:
+                            prompt_tokens     = data.get("prompt_eval_count", 0)
+                            completion_tokens = data.get("eval_count", 0)
+                            on_eval_count(prompt_tokens, completion_tokens)
+                        # Signal completion AFTER all tokens have been enqueued
+                        on_done()
+                        return
+
+                # Stream ended without a done=true chunk (e.g. stop_event set)
                 on_done()
+
             except requests.exceptions.ConnectionError:
                 on_error("Cannot reach Ollama. Start it with:  ollama serve")
             except requests.exceptions.Timeout:
@@ -652,52 +809,26 @@ class OllamaClient:
 # ══════════════════════════════════════════════════════════════════════════════
 
 def _highlight_code(widget: tk.Text, code: str, lang: str, start_idx: str) -> None:
-    """
-    Apply syntax-highlight tags to a code block already inserted into `widget`.
-    `start_idx` is the tk index of the first character of `code` in the widget.
-    """
     rules = _SH_RULES.get(lang.lower(), [])
     if not rules:
         return
-
     lines = code.split("\n")
-
     for pat, color in rules:
         tag = f"sh_{color.replace('#', '')}"
         widget.tag_configure(tag, foreground=color)
-        pos = 0
         for line_no, line in enumerate(lines):
             for m in re.finditer(pat, line):
                 row = int(start_idx.split(".")[0]) + line_no
                 col_s = m.start()
                 col_e = m.end()
                 widget.tag_add(tag, f"{row}.{col_s}", f"{row}.{col_e}")
-            pos += len(line) + 1
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  Markdown renderer for tk.Text widgets  (v2 — extended)
+#  Markdown renderer
 # ══════════════════════════════════════════════════════════════════════════════
 
 class MarkdownRenderer:
-    """
-    Renders markdown into a tk.Text widget.
-
-    Supported syntax:
-      Headings:       # / ## / ###
-      Emphasis:       **bold**, *italic*, ~~strikethrough~~, `inline code`
-      Links:          [text](url) and bare https?://...
-      Code blocks:    ``` fenced (with optional language hint + syntax highlighting)
-      Lists:          - / * / + unordered (nested via leading spaces)
-                      1. ordered (nested)
-      Task lists:     - [ ] unchecked   - [x] checked
-      Blockquotes:    > text (nestable with >>)
-      Tables:         | Col | Col |  with header separator
-      Horizontal rule: --- / *** / ___
-      Plain text with wrapping
-    """
-
-    # ── Compiled patterns ────────────────────────────────────────────────────
     _RE_FENCE   = re.compile(r"^(`{3,})([\w+-]*)")
     _RE_H3      = re.compile(r"^###\s+(.+)")
     _RE_H2      = re.compile(r"^##\s+(.+)")
@@ -712,12 +843,12 @@ class MarkdownRenderer:
     _RE_TABLE_S = re.compile(r"^\|[\s\-:|]+\|$")
 
     _RE_INLINE  = re.compile(
-        r"(\*\*|__)(.+?)\1"                    # bold
-        r"|~~(.+?)~~"                           # strikethrough
-        r"|(\*|_)(.+?)\4"                       # italic
-        r"|`([^`]+)`"                           # inline code
-        r"|\[([^\]]+)\]\(([^)]+)\)"            # [text](url)
-        r"|(https?://\S+)"                      # bare URL
+        r"(\*\*|__)(.+?)\1"
+        r"|~~(.+?)~~"
+        r"|(\*|_)(.+?)\4"
+        r"|`([^`]+)`"
+        r"|\[([^\]]+)\]\(([^)]+)\)"
+        r"|(https?://\S+)"
     )
 
     def __init__(self, widget: tk.Text, bubble_bg: str, text_fg: str):
@@ -749,6 +880,13 @@ class MarkdownRenderer:
                         background=BG_BLOCKQUOTE, foreground=FG_BLOCKQUOTE,
                         lmargin1=20, lmargin2=20, spacing1=2, spacing3=2,
                         font=("SF Pro Display", 12, "italic"))
+        w.tag_configure("think_block",
+                        background="#1a1a28", foreground="#666688",
+                        lmargin1=14, lmargin2=14, spacing1=2, spacing3=2,
+                        font=("SF Pro Display", 11, "italic"))
+        w.tag_configure("think_label",
+                        background="#1a1a28", foreground="#4455aa",
+                        font=("SF Pro Display", 9, "bold"))
         w.tag_configure("ul_item",    lmargin1=16, lmargin2=28)
         w.tag_configure("ul_item_2",  lmargin1=36, lmargin2=48)
         w.tag_configure("ul_item_3",  lmargin1=56, lmargin2=68)
@@ -760,7 +898,6 @@ class MarkdownRenderer:
         w.tag_configure("hr",         foreground="#444444", spacing1=6, spacing3=6)
         w.tag_configure("link",       foreground=FG_LINK, underline=True)
         w.tag_configure("normal",     foreground=self._fg)
-        # Table tags
         w.tag_configure("tbl_hdr",
                         font=("SF Pro Display", 11, "bold"),
                         foreground=FG_TABLE_HDR, background=BG_TABLE_HDR,
@@ -774,9 +911,43 @@ class MarkdownRenderer:
                         foreground=self._fg, background=BG_TABLE_ALT,
                         spacing1=2, spacing3=2, lmargin1=8, lmargin2=8)
 
-    # ── Public entry point ───────────────────────────────────────────────────
+    # Pre-compile regex for think blocks
+    _RE_THINK = re.compile(r"<think>([\s\S]*?)(?:</think>|$)", re.IGNORECASE)
+
+    def _render_think_block(self, content: str, closed: bool) -> None:
+        """Render a <think> block in a dimmed, collapsible-style box."""
+        w = self._w
+        label = "💭 Thinking…" if not closed else "💭 Thought process"
+        w.insert("end", f" {label} \n", "think_label")
+        for line in content.strip().split("\n"):
+            w.insert("end", line + "\n", "think_block")
+        w.insert("end", "\n")
 
     def render(self, text: str) -> None:
+        w = self._w
+
+        # ── Pre-process: extract and render <think> blocks first ──────────────
+        # Split on <think>...</think> so we render them as special collapsed blocks
+        # and pass the rest through the normal Markdown pipeline.
+        think_split = re.split(r"(<think>[\s\S]*?(?:</think>|$))", text, flags=re.IGNORECASE)
+        if len(think_split) > 1:
+            # There are think blocks — process each segment
+            for segment in think_split:
+                if not segment:
+                    continue
+                m = re.match(r"<think>([\s\S]*?)(?:</think>|$)", segment, re.IGNORECASE)
+                if m:
+                    closed = segment.lower().rstrip().endswith("</think>")
+                    self._render_think_block(m.group(1), closed)
+                else:
+                    if segment.strip():
+                        self._render_lines(segment)
+            return
+
+        # No think blocks — render normally
+        self._render_lines(text)
+
+    def _render_lines(self, text: str) -> None:
         w = self._w
         lines = text.split("\n")
         i, n  = 0, len(lines)
@@ -784,7 +955,6 @@ class MarkdownRenderer:
         while i < n:
             line = lines[i]
 
-            # ── Fenced code block ─────────────────────────────────────────
             fm = self._RE_FENCE.match(line)
             if fm:
                 fence_char = fm.group(1)
@@ -794,8 +964,48 @@ class MarkdownRenderer:
                 while i < n and not lines[i].startswith(fence_char):
                     code_lines.append(lines[i])
                     i += 1
-                i += 1  # skip closing fence
+                i += 1
                 code_text = "\n".join(code_lines)
+
+                # ── Copy button embedded in the Text widget ───────────────────
+                # Build a small header bar: [lang label]  [Copy]
+                header_frame = tk.Frame(w, bg="#0d1117", pady=2)
+                lang_lbl = tk.Label(
+                    header_frame,
+                    text=lang or "text",
+                    bg="#0d1117", fg="#8b949e",
+                    font=("SF Mono", 9),
+                    padx=8, pady=2,
+                )
+                lang_lbl.pack(side="left")
+
+                _code_ref = code_text   # closure capture
+
+                def _copy_code(c=_code_ref, btn=None):
+                    try:
+                        w.clipboard_clear()
+                        w.clipboard_append(c)
+                        if btn:
+                            btn.config(text="Copied!", fg="#4ec994")
+                            w.after(1500, lambda: btn.config(text="Copy", fg="#8b949e"))
+                    except Exception:
+                        pass
+
+                copy_btn = tk.Label(
+                    header_frame,
+                    text="Copy", bg="#0d1117", fg="#8b949e",
+                    font=("SF Mono", 9), padx=8, pady=2, cursor="hand2",
+                )
+                copy_btn.config(command=None)
+                copy_btn.bind("<Button-1>", lambda e, c=_code_ref, b=copy_btn: _copy_code(c, b))
+                copy_btn.bind("<Enter>",    lambda e: copy_btn.config(fg="#e8e8e8"))
+                copy_btn.bind("<Leave>",    lambda e: copy_btn.config(fg="#8b949e"))
+                copy_btn.pack(side="right")
+
+                w.insert("end", "\n")
+                w.window_create("end", window=header_frame, stretch=True)
+                w.insert("end", "\n")
+
                 start_idx = w.index("end-1c")
                 w.insert("end", code_text + "\n", "code_block")
                 if lang:
@@ -803,9 +1013,9 @@ class MarkdownRenderer:
                         _highlight_code(w, code_text, lang, start_idx)
                     except Exception:
                         pass
+                w.insert("end", "\n")
                 continue
 
-            # ── Table detection (collect all rows) ───────────────────────
             if self._RE_TABLE_R.match(line):
                 table_lines = []
                 while i < n and self._RE_TABLE_R.match(lines[i]):
@@ -814,7 +1024,6 @@ class MarkdownRenderer:
                 self._render_table(table_lines)
                 continue
 
-            # ── Blockquote ────────────────────────────────────────────────
             bm = self._RE_BQ.match(line)
             if bm:
                 content = bm.group(2)
@@ -824,7 +1033,6 @@ class MarkdownRenderer:
                 i += 1
                 continue
 
-            # ── Headings ──────────────────────────────────────────────────
             m = self._RE_H3.match(line)
             if m:
                 self._insert_inline(m.group(1), "h3")
@@ -844,17 +1052,13 @@ class MarkdownRenderer:
                 i += 1
                 continue
 
-            # ── HR ────────────────────────────────────────────────────────
             if self._RE_HR.match(line):
                 w.insert("end", "─" * 52 + "\n", "hr")
                 i += 1
                 continue
 
-            # ── Task list (must check before plain UL) ────────────────────
             tm = self._RE_TASK_C.match(line)
             if tm:
-                indent = len(tm.group(1)) // 2
-                lvl_tag = f"ul_item{'_'+str(min(indent+1,3)) if indent else ''}"
                 w.insert("end", "☑ ", ("task_box",))
                 self._insert_inline(tm.group(2), "task_done")
                 w.insert("end", "\n")
@@ -868,7 +1072,6 @@ class MarkdownRenderer:
                 i += 1
                 continue
 
-            # ── Unordered list ────────────────────────────────────────────
             m = self._RE_UL.match(line)
             if m:
                 indent = len(m.group(1)) // 2
@@ -881,7 +1084,6 @@ class MarkdownRenderer:
                 i += 1
                 continue
 
-            # ── Ordered list ──────────────────────────────────────────────
             m = self._RE_OL.match(line)
             if m:
                 indent = len(m.group(1)) // 2
@@ -893,29 +1095,21 @@ class MarkdownRenderer:
                 i += 1
                 continue
 
-            # ── Plain / inline-styled line ────────────────────────────────
             self._insert_inline(line, "normal")
             w.insert("end", "\n")
             i += 1
 
-    # ── Table renderer ───────────────────────────────────────────────────────
-
     def _render_table(self, rows: List[str]) -> None:
         w = self._w
-        # Filter out separator rows
         data_rows = [r for r in rows if not self._RE_TABLE_S.match(r)]
         if not data_rows:
             return
-
         for row_idx, row in enumerate(data_rows):
             cells = [c.strip() for c in row.strip("|").split("|")]
             tag = "tbl_hdr" if row_idx == 0 else ("tbl_alt" if row_idx % 2 == 0 else "tbl_row")
             line = "  ".join(f"{cell:<20}" for cell in cells)
             w.insert("end", line + "\n", tag)
-
         w.insert("end", "\n")
-
-    # ── Inline markdown ──────────────────────────────────────────────────────
 
     def _insert_inline(self, text: str, base_tag: str) -> None:
         w   = self._w
@@ -1008,6 +1202,173 @@ class HoverButton(tk.Label):
     def disable(self):
         self._enabled = False
         self.config(bg="#111111", fg="#555555", cursor="arrow")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  Stats Bar
+# ══════════════════════════════════════════════════════════════════════════════
+
+class StatsBar(tk.Frame):
+    _BAR_W  = 60
+    _BAR_H  = 7
+
+    def __init__(self, parent, **kw):
+        super().__init__(parent, bg=BG_STATS, **kw)
+        self._stats = GenStats()
+        self._build()
+
+    def _build(self):
+        tk.Frame(self, bg="#2a2a2a", height=1).pack(fill="x")
+
+        inner = tk.Frame(self, bg=BG_STATS)
+        inner.pack(fill="x", padx=12, pady=(3, 3))
+
+        row1 = tk.Frame(inner, bg=BG_STATS)
+        row1.pack(fill="x")
+
+        self._lbl_tps    = self._stat_cell(row1, "tok/s",       "—")
+        self._sep(row1)
+        self._lbl_resp   = self._stat_cell(row1, "response",    "—  tok")
+        self._sep(row1)
+        self._lbl_sess   = self._stat_cell(row1, "session",     "—  tok")
+        self._sep(row1)
+        self._lbl_ttft   = self._stat_cell(row1, "first token", "—")
+        self._sep(row1)
+        self._lbl_gtime  = self._stat_cell(row1, "gen time",    "—")
+
+        row2 = tk.Frame(inner, bg=BG_STATS)
+        row2.pack(fill="x", pady=(2, 0))
+
+        self._lbl_device = self._stat_cell(row2, "device",      "—")
+        self._sep(row2)
+        self._lbl_vram   = self._stat_cell(row2, "VRAM",        "—")
+        self._sep(row2)
+        ctx_frame = tk.Frame(row2, bg=BG_STATS)
+        ctx_frame.pack(side="left")
+        tk.Label(ctx_frame, text="ctx", bg=BG_STATS, fg=FG_STATS_LBL,
+                 font=FONT_STATS_LBL).pack(side="left", padx=(0, 3))
+        self._ctx_canvas = tk.Canvas(
+            ctx_frame,
+            width=self._BAR_W, height=self._BAR_H,
+            bg="#222222", bd=0, highlightthickness=0,
+        )
+        self._ctx_canvas.pack(side="left")
+        self._ctx_fill = self._ctx_canvas.create_rectangle(
+            0, 0, 0, self._BAR_H,
+            fill=FG_STATS_GOOD, outline="",
+        )
+        self._lbl_ctx_pct = tk.Label(
+            ctx_frame, text="—", bg=BG_STATS, fg=FG_STATS_VAL,
+            font=FONT_STATS,
+        )
+        self._lbl_ctx_pct.pack(side="left", padx=(4, 0))
+
+    def _stat_cell(self, parent: tk.Frame, label: str, initial: str) -> tk.Label:
+        cell = tk.Frame(parent, bg=BG_STATS)
+        cell.pack(side="left", padx=(0, 0))
+        tk.Label(cell, text=label, bg=BG_STATS, fg=FG_STATS_LBL,
+                 font=FONT_STATS_LBL).pack(side="left", padx=(0, 3))
+        val = tk.Label(cell, text=initial, bg=BG_STATS, fg=FG_STATS_VAL,
+                       font=FONT_STATS)
+        val.pack(side="left")
+        return val
+
+    def _sep(self, parent: tk.Frame):
+        tk.Label(parent, text=" · ", bg=BG_STATS, fg="#333333",
+                 font=FONT_STATS).pack(side="left")
+
+    def update_gen_stats(self, stats: GenStats):
+        self._stats = stats
+
+        tps = stats.tokens_per_sec
+        self._lbl_tps.config(
+            text=f"{tps:.1f}" if tps > 0 else "—",
+            fg=FG_STATS_GOOD if tps >= 10 else (FG_STATS_WARN if tps > 0 else FG_STATS_VAL),
+        )
+
+        rt = stats.response_tokens
+        self._lbl_resp.config(
+            text=f"{rt:,}  tok" if rt > 0 else "—  tok",
+        )
+
+        st = stats.session_total_tokens
+        self._lbl_sess.config(
+            text=f"{st:,}  tok" if st > 0 else "—  tok",
+        )
+
+        ttft = stats.time_to_first
+        self._lbl_ttft.config(
+            text=f"{ttft:.2f}s" if ttft > 0 else "—",
+            fg=(FG_STATS_GOOD if ttft < 1.0
+                else FG_STATS_WARN if ttft < 3.0
+                else FG_STATS_BAD) if ttft > 0 else FG_STATS_VAL,
+        )
+
+        gt = stats.total_gen_time
+        self._lbl_gtime.config(
+            text=f"{gt:.1f}s" if gt > 0 else "—",
+        )
+
+    def update_hw_stats(self, stats: GenStats):
+        self._stats = stats
+
+        dev = stats.device
+        if dev == "GPU":
+            dev_text = "GPU"
+            dev_fg   = FG_STATS_GOOD
+        elif dev == "CPU":
+            thr = stats.num_threads
+            dev_text = f"CPU  ×{thr}" if thr > 0 else "CPU"
+            dev_fg   = FG_STATS_WARN
+        else:
+            dev_text = "—"
+            dev_fg   = FG_STATS_VAL
+        self._lbl_device.config(text=dev_text, fg=dev_fg)
+
+        used  = stats.vram_used_mb
+        free  = stats.vram_free_mb
+        total = stats.vram_total_mb
+        if total > 0:
+            vram_text = f"{used:,} MB used  /  {free:,} MB free  /  {total:,} MB"
+            pct = used / total
+            vram_fg = (FG_STATS_GOOD if pct < 0.7
+                       else FG_STATS_WARN if pct < 0.9
+                       else FG_STATS_BAD)
+        elif used > 0:
+            vram_text = f"{used:,} MB used"
+            vram_fg   = FG_STATS_VAL
+        else:
+            vram_text = "—"
+            vram_fg   = FG_STATS_VAL
+        self._lbl_vram.config(text=vram_text, fg=vram_fg)
+
+        pct = stats.context_fill_pct
+        if stats.context_size > 0:
+            fill_w = int(self._BAR_W * pct)
+            bar_color = (FG_STATS_GOOD if pct < 0.7
+                         else FG_STATS_WARN if pct < 0.9
+                         else FG_STATS_BAD)
+            self._ctx_canvas.itemconfig(self._ctx_fill, fill=bar_color)
+            self._ctx_canvas.coords(self._ctx_fill, 0, 0, fill_w, self._BAR_H)
+            used_k  = stats.context_used
+            total_k = stats.context_size
+            pct_str = f"{pct * 100:.0f}%  ({used_k:,} / {total_k:,} tok)"
+            ctx_fg  = (FG_STATS_GOOD if pct < 0.7
+                       else FG_STATS_WARN if pct < 0.9
+                       else FG_STATS_BAD)
+            self._lbl_ctx_pct.config(text=pct_str, fg=ctx_fg)
+        else:
+            self._ctx_canvas.coords(self._ctx_fill, 0, 0, 0, self._BAR_H)
+            self._lbl_ctx_pct.config(text="—", fg=FG_STATS_VAL)
+
+    def reset(self):
+        for lbl in (self._lbl_tps, self._lbl_resp, self._lbl_sess,
+                    self._lbl_ttft, self._lbl_gtime):
+            lbl.config(text="—", fg=FG_STATS_VAL)
+        self._lbl_device.config(text="—", fg=FG_STATS_VAL)
+        self._lbl_vram.config(text="—",   fg=FG_STATS_VAL)
+        self._ctx_canvas.coords(self._ctx_fill, 0, 0, 0, self._BAR_H)
+        self._lbl_ctx_pct.config(text="—", fg=FG_STATS_VAL)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1171,7 +1532,7 @@ class SullybaseApp(tk.Tk):
         logger.info(f"Starting {APP_NAME} v{APP_VERSION}")
 
         self._settings = Settings()
-        self.title(APP_NAME)
+        self.title(f"{APP_NAME}  v{APP_VERSION}")
         self.geometry(self._settings.get("window_geometry", "1020x760"))
         self.minsize(720, 520)
         self.configure(bg=BG_ROOT)
@@ -1188,13 +1549,23 @@ class SullybaseApp(tk.Tk):
         self._asst_md:   Optional[MarkdownRenderer] = None
         self._asst_buf:  str = ""
 
+        # ── FIX: track whether _DONE has been received so we don't call
+        #    _finish_generation() before the queue is fully drained. ──────────
+        self._done_pending: bool = False
+
         self._chat_id   = self._settings.get("current_chat_id", "current")
         self._chat_meta = self._blank_meta(self._chat_id)
         self._history:  List[ChatMessage] = []
         self._last_user = ""
-        self._is_first_message = True   # True until first exchange in THIS chat
+        self._is_first_message = True
 
         self._model_var = tk.StringVar(value=self._settings.get("model", ""))
+
+        self._gen_stats       = GenStats()
+        self._gen_start_time  = 0.0
+        self._first_tok_time  = 0.0
+        self._got_first_tok   = False
+        self._stats_poll_id:  Optional[str] = None
 
         self._style_ttk()
         self._build_ui()
@@ -1203,6 +1574,7 @@ class SullybaseApp(tk.Tk):
         self._refresh_models()
         self._history_panel.refresh()
         self._start_drain()
+        self._schedule_stats_poll()
 
     @staticmethod
     def _blank_meta(chat_id: str) -> ChatMeta:
@@ -1216,6 +1588,9 @@ class SullybaseApp(tk.Tk):
             if self._drain_id:
                 self.after_cancel(self._drain_id)
                 self._drain_id = None
+            if self._stats_poll_id:
+                self.after_cancel(self._stats_poll_id)
+                self._stats_poll_id = None
             self._stop_evt.set()
             if self._stream_thr and self._stream_thr.is_alive():
                 self._stream_thr.join(timeout=3.0)
@@ -1316,6 +1691,7 @@ class SullybaseApp(tk.Tk):
             w.bind("<Button-4>",   self._on_wheel)
             w.bind("<Button-5>",   self._on_wheel)
 
+        # ── Status bar ────────────────────────────────────────────────────────
         sbar = tk.Frame(self, bg=BG_SIDEBAR, height=22)
         sbar.pack(side="bottom", fill="x")
         sbar.pack_propagate(False)
@@ -1324,12 +1700,26 @@ class SullybaseApp(tk.Tk):
             font=FONT_LBL, padx=10, anchor="w"
         )
         self._status_lbl.pack(side="left", fill="x", expand=True)
-        tk.Label(sbar, text=f"v{APP_VERSION}  ·  {SETTINGS_FILE}",
-                 bg=BG_SIDEBAR, fg="#555555", font=FONT_LBL, padx=10
+        tk.Label(sbar, text="Copyright © 2026 Sullydux (GitHub). All rights reserved.",
+                 bg=BG_SIDEBAR, fg="#444444", font=("SF Pro Display", 9), padx=10
                  ).pack(side="right")
 
+        # ── Stats bar ─────────────────────────────────────────────────────────
+        self._stats_bar = StatsBar(self)
+        self._stats_bar.pack(side="bottom", fill="x")
+
+        # ── Input area ────────────────────────────────────────────────────────
         ia = tk.Frame(self, bg=BG_INPUT, pady=8)
         ia.pack(side="bottom", fill="x")
+
+        hint = tk.Frame(ia, bg=BG_INPUT)
+        hint.pack(fill="x", padx=12, pady=(0, 2))
+        tk.Label(hint, text="Return = send  ·  Shift+Return = newline",
+                 bg=BG_INPUT, fg=FG_DIM, font=FONT_LBL
+                 ).pack(side="left")
+
+        # ── Attached-files chip bar (hidden when empty) ───────────────────────
+        # (chip bar removed — context files shown in sidebar panel)
 
         row = tk.Frame(ia, bg=BG_INPUT)
         row.pack(fill="x", padx=12)
@@ -1361,9 +1751,9 @@ class SullybaseApp(tk.Tk):
         self._stop_btn.pack(fill="x", pady=(6, 0))
         self._stop_btn.disable()
 
-        tk.Label(ia, text="Return = send  ·  Shift+Return = newline",
-                 bg=BG_INPUT, fg=FG_DIM, font=FONT_LBL
-                 ).pack(pady=(3, 0))
+        # Attach button removed — use the "+ Add" button in the sidebar context panel
+
+    # ── Canvas / scroll ───────────────────────────────────────────────────────
 
     def _on_canvas_resize(self, event):
         self._canvas.itemconfig(self._canvas_win, width=event.width)
@@ -1380,10 +1770,17 @@ class SullybaseApp(tk.Tk):
             self._canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
 
     def _scroll_to_bottom(self):
-        self.after(10,  lambda: self._canvas.update_idletasks())
-        self.after(20,  lambda: self._canvas.configure(
-            scrollregion=self._canvas.bbox("all")))
-        self.after(30,  lambda: self._canvas.yview_moveto(1.0))
+        # Update scroll region and move to bottom in one deferred call
+        self.after(20, self._do_scroll_bottom)
+
+    def _do_scroll_bottom(self):
+        try:
+            self._canvas.configure(scrollregion=self._canvas.bbox("all"))
+            self._canvas.yview_moveto(1.0)
+        except Exception:
+            pass
+
+    # ── Bubble builders ───────────────────────────────────────────────────────
 
     def _add_bubble(self, role: str, text: str = "") -> Tuple[tk.Text, Optional[MarkdownRenderer]]:
         is_user   = (role == "user")
@@ -1475,6 +1872,8 @@ class SullybaseApp(tk.Tk):
             w.destroy()
         gc.collect()
 
+    # ── Model / settings ──────────────────────────────────────────────────────
+
     def _refresh_models(self):
         def _bg():
             models = self._client.list_models()
@@ -1490,6 +1889,7 @@ class SullybaseApp(tk.Tk):
             elif not self._model_var.get() or self._model_var.get() not in models:
                 self._model_combo.current(0)
             self._status(f"Ready — {len(models)} model(s)")
+            self._poll_hw_stats()
         else:
             self._model_combo["values"] = []
             self._model_var.set("")
@@ -1498,6 +1898,7 @@ class SullybaseApp(tk.Tk):
     def _on_model_select(self, _=None):
         self._settings.set("model", self._model_var.get())
         self._settings.save()
+        self._poll_hw_stats()
 
     def _on_ctx_change(self):
         items = self._ctx_panel.items
@@ -1506,6 +1907,50 @@ class SullybaseApp(tk.Tk):
             self._status(f"Context: {len(items)} file(s) · {total:,} chars")
         else:
             self._status("Ready")
+
+    # ── Stats polling ─────────────────────────────────────────────────────────
+
+    def _schedule_stats_poll(self):
+        self._stats_poll_id = self.after(STATS_POLL_MS, self._poll_cycle)
+
+    def _poll_cycle(self):
+        self._poll_hw_stats()
+        interval = STATS_POLL_GEN_MS if self._generating else STATS_POLL_MS
+        self._stats_poll_id = self.after(interval, self._poll_cycle)
+
+    def _poll_hw_stats(self):
+        model = self._model_var.get()
+
+        def _bg():
+            ps   = self._client.get_ps_info()
+            info = self._client.get_model_info(model) if model else {}
+
+            def _update():
+                s = self._gen_stats
+                s.vram_used_mb  = ps.get("vram_used_mb",  0)
+                s.vram_free_mb  = ps.get("vram_free_mb",  0)
+                s.vram_total_mb = ps.get("vram_total_mb", 0)
+                s.device        = ps.get("device",        "")
+                s.context_size  = info.get("context_length", 0)
+                s.num_threads   = info.get("num_thread",     0)
+                s.context_used  = self._estimate_context_tokens()
+                self._stats_bar.update_hw_stats(s)
+
+            self.after(0, _update)
+
+        threading.Thread(target=_bg, daemon=True, name="stats-poll").start()
+
+    def _estimate_context_tokens(self) -> int:
+        total_chars = len(AI_SYSTEM_PROMPT)
+        # Include context file content
+        for cf in self._ctx_panel.items:
+            total_chars += len(cf.text)
+        for msg in self._history:
+            total_chars += len(msg.content)
+        total_chars += len(self._asst_buf)
+        return total_chars // 4
+
+    # ── Chat persistence ──────────────────────────────────────────────────────
 
     def _persist_chat(self):
         try:
@@ -1556,6 +2001,7 @@ class SullybaseApp(tk.Tk):
             self._chat_meta = self._blank_meta(chat_id)
             self._status("Ready")
             self._is_first_message = True
+        self._gen_stats.context_used = self._estimate_context_tokens()
 
     def _new_chat(self):
         if self._generating:
@@ -1567,12 +2013,19 @@ class SullybaseApp(tk.Tk):
         self._chat_meta = self._blank_meta(new_id)
         self._history.clear()
         self._clear_widgets()
-        self._ctx_panel.clear()
+        # Intentionally do NOT clear context files — they belong to the session,
+        # not to a single conversation.  The user can remove them via the ✕ chips.
         self._is_first_message = True
         self._settings.set("current_chat_id", new_id)
         self._settings.save()
         self._history_panel.refresh()
         self._status("New chat started")
+        self._gen_stats.reset_response()
+        self._gen_stats.session_prompt_tokens     = 0
+        self._gen_stats.session_completion_tokens = 0
+        self._gen_stats.context_used              = 0
+        self._stats_bar.update_gen_stats(self._gen_stats)
+        self._stats_bar.update_hw_stats(self._gen_stats)
         logger.info(f"New chat: {new_id}")
 
     def _open_chat_readonly(self, chat_id: str):
@@ -1606,33 +2059,44 @@ class SullybaseApp(tk.Tk):
         txt.config(state="disabled")
 
     def _build_messages(self, user_text: str) -> List[dict]:
-        """
-        Build the message list to send to Ollama.
-
-        The system prompt is injected only on the very first message of a chat
-        (when self._history is empty). For subsequent messages, the model already
-        has the system instructions in its context window, so we omit it to avoid
-        token bloat.
-        """
         msgs: List[dict] = []
+        ctx_items = self._ctx_panel.items
+        sys_content = AI_SYSTEM_PROMPT
 
-        # ── System prompt: first message only ────────────────────────────────
-        if not self._history:
-            ctx_items = self._ctx_panel.items
-            sys_content = AI_SYSTEM_PROMPT
-            if ctx_items:
-                sys_content += (
-                    "\n\nThe following context files are loaded:\n\n"
-                    + "\n\n---\n\n".join(cf.text for cf in ctx_items)
-                )
-            msgs.append({"role": "system", "content": sys_content})
+        if ctx_items:
+            file_sections: List[str] = []
+            for cf in ctx_items:
+                # Always re-read from disk so edits since load are picked up.
+                # Fall back to the cached .text if the path is gone/unreadable.
+                if cf.path and cf.path.exists():
+                    try:
+                        fresh = _read_text(cf.path)
+                        if fresh is not None:
+                            # For folder children the original text had a ### header
+                            if cf.text.startswith("### "):
+                                header_end = cf.text.index("\n") + 1
+                                header = cf.text[:header_end]
+                                file_sections.append(header + fresh)
+                            else:
+                                file_sections.append(fresh)
+                            continue
+                    except Exception as exc:
+                        logger.warning(f"_build_messages re-read {cf.path}: {exc}")
+                # fallback to cached text
+                file_sections.append(cf.text)
 
-        # ── Full conversation history ─────────────────────────────────────────
+            sys_content += (
+                "\n\nThe following files are attached and available for every message "
+                "in this conversation. Refer to them whenever they are relevant:\n\n"
+                + "\n\n---\n\n".join(file_sections)
+            )
+
+        msgs.append({"role": "system", "content": sys_content})
         msgs += [{"role": m.role, "content": m.content} for m in self._history]
-
-        # ── Current user turn ────────────────────────────────────────────────
         msgs.append({"role": "user", "content": user_text})
         return msgs
+
+    # ── Input handlers ────────────────────────────────────────────────────────
 
     def _on_return(self, event) -> Optional[str]:
         if event.state & 0x1:
@@ -1666,7 +2130,15 @@ class SullybaseApp(tk.Tk):
             self._is_first_message = False
             self._request_llm_title(user_text)
 
-        self._generating = True
+        # Reset per-response stats
+        self._gen_stats.reset_response()
+        self._gen_start_time = time.monotonic()
+        self._first_tok_time = 0.0
+        self._got_first_tok  = False
+        self._stats_bar.update_gen_stats(self._gen_stats)
+
+        self._generating    = True
+        self._done_pending  = False   # FIX: reset done flag for new generation
         self._stop_evt.clear()
         self._send_btn.disable()
         self._stop_btn.enable()
@@ -1679,34 +2151,138 @@ class SullybaseApp(tk.Tk):
             on_token=lambda tok: self._tok_queue.put((_TOKEN, tok)),
             on_done=lambda:        self._tok_queue.put(_DONE),
             on_error=lambda err:   self._tok_queue.put((_ERROR, err)),
+            on_eval_count=lambda p, c: self._tok_queue.put(("EVAL", p, c)),
         )
+
+    # ── Token drain loop ──────────────────────────────────────────────────────
 
     def _start_drain(self):
         self._drain_id = self.after(DRAIN_INTERVAL_MS, self._drain)
 
     def _drain(self):
+        """
+        Pump items from the token queue onto the UI.
+
+        KEY FIX — two-pass design:
+          Pass 1: drain ALL pending items without limit, collecting tokens into
+                  a single string and noting whether _DONE / _ERROR arrived.
+          Pass 2: do ONE re-render of the bubble with the accumulated text,
+                  then call _finish_generation() if done.
+
+        This guarantees:
+          • Every token the network thread put in the queue before _DONE is
+            processed before we finalise — there is no "break on _DONE" that
+            could discard queued tokens.
+          • The Text widget is only mutated once per drain tick, not once per
+            token, which eliminates the flickering / partial-render artefacts.
+        """
+        accumulated_tokens = ""
+        done_received      = False
+        error_msg          = None
+        eval_counts        = None   # (prompt_toks, completion_toks)
+
+        # ── Pass 1: drain everything currently in the queue ───────────────────
         try:
-            for _ in range(200):
+            while True:
                 item = self._tok_queue.get_nowait()
+
                 if item is _DONE:
-                    self._finish_generation()
-                    break
+                    # Mark done but keep draining — more tokens may be queued
+                    done_received = True
+
                 elif isinstance(item, tuple):
-                    kind, payload = item
-                    if kind is _TOKEN and self._asst_tw and self._asst_md and self._generating:
-                        self._append_token(self._asst_tw, self._asst_md, payload)
+                    kind = item[0]
+
+                    if kind is _TOKEN:
+                        accumulated_tokens += item[1]
+
                     elif kind is _ERROR:
-                        self._show_error(payload)
+                        error_msg = item[1]
+                        # Treat an error as terminal; stop draining
                         break
+
+                    elif kind == "EVAL":
+                        eval_counts = (item[1], item[2])
+
         except queue.Empty:
             pass
-        finally:
-            self._drain_id = self.after(DRAIN_INTERVAL_MS, self._drain)
+
+        # ── Pass 2: apply accumulated updates to the UI ───────────────────────
+        if accumulated_tokens and self._asst_tw and self._asst_md and self._generating:
+            # Record first-token timing
+            if not self._got_first_tok:
+                self._got_first_tok  = True
+                self._first_tok_time = time.monotonic()
+                self._gen_stats.time_to_first = (
+                    self._first_tok_time - self._gen_start_time
+                )
+
+            self._asst_buf += accumulated_tokens
+            # Approximate token count: chars/4 is more accurate than word-split
+            self._gen_stats.response_tokens = max(
+                self._gen_stats.response_tokens,
+                len(self._asst_buf) // 4,
+            )
+
+            # Update tok/s
+            elapsed = time.monotonic() - self._first_tok_time
+            if elapsed > 0:
+                self._gen_stats.tokens_per_sec = (
+                    self._gen_stats.response_tokens / elapsed
+                )
+            self._gen_stats.context_used = self._estimate_context_tokens()
+
+            # Re-render the bubble once with the full buffer so far
+            try:
+                self._asst_tw.config(state="normal")
+                self._asst_tw.delete("1.0", "end")
+                self._asst_md.render(self._asst_buf)
+                self._asst_tw.config(state="disabled")
+                self._fit_bubble(self._asst_tw)
+                self._scroll_to_bottom()
+            except tk.TclError:
+                pass
+            except Exception as exc:
+                logger.warning(f"drain render: {exc}")
+
+            self._stats_bar.update_gen_stats(self._gen_stats)
+            self._stats_bar.update_hw_stats(self._gen_stats)
+
+        if eval_counts is not None:
+            prompt_toks, comp_toks = eval_counts
+            self._gen_stats.session_prompt_tokens     += prompt_toks
+            self._gen_stats.session_completion_tokens += comp_toks
+            if comp_toks > 0:
+                # Override approximation with Ollama's actual token count
+                self._gen_stats.response_tokens = comp_toks
+                # Recalculate tok/s with accurate numbers
+                elapsed = time.monotonic() - self._first_tok_time
+                if elapsed > 0:
+                    self._gen_stats.tokens_per_sec = comp_toks / elapsed
+            self._stats_bar.update_gen_stats(self._gen_stats)
+
+        if error_msg is not None:
+            self._show_error(error_msg)
+        elif done_received:
+            self._finish_generation()
+
+        # Reschedule
+        self._drain_id = self.after(DRAIN_INTERVAL_MS, self._drain)
+
+    # ── Generation lifecycle ──────────────────────────────────────────────────
 
     def _finish_generation(self):
         if not self._generating:
             return
         try:
+            now = time.monotonic()
+            self._gen_stats.total_gen_time = now - self._gen_start_time
+            if self._gen_stats.total_gen_time > 0 and self._gen_stats.response_tokens > 0:
+                self._gen_stats.tokens_per_sec = (
+                    self._gen_stats.response_tokens / self._gen_stats.total_gen_time
+                )
+            self._stats_bar.update_gen_stats(self._gen_stats)
+
             final = self._asst_buf
             if self._asst_tw:
                 self._asst_tw.config(state="disabled")
@@ -1726,6 +2302,9 @@ class SullybaseApp(tk.Tk):
 
     def _stop_generation(self):
         self._stop_evt.set()
+        now = time.monotonic()
+        self._gen_stats.total_gen_time = now - self._gen_start_time
+        self._stats_bar.update_gen_stats(self._gen_stats)
         if self._asst_buf:
             self._history.append(ChatMessage("user",      self._last_user))
             self._history.append(ChatMessage("assistant", self._asst_buf + " [stopped]"))
@@ -1739,7 +2318,12 @@ class SullybaseApp(tk.Tk):
     def _show_error(self, msg: str):
         try:
             if self._asst_tw and self._asst_md:
-                self._append_token(self._asst_tw, self._asst_md, f"\n\n⚠  {msg}")
+                self._asst_buf += f"\n\n⚠  {msg}"
+                self._asst_tw.config(state="normal")
+                self._asst_tw.delete("1.0", "end")
+                self._asst_md.render(self._asst_buf)
+                self._asst_tw.config(state="disabled")
+                self._fit_bubble(self._asst_tw)
             logger.error(f"stream error: {msg}")
         except Exception:
             pass
