@@ -97,6 +97,16 @@ Ensure Ollama is installed and `ollama serve` is running. The file browser falls
 
 ---
 
+## Updates
+
+- Gemini support
+- MLX support
+- Custom instructions and settings
+- LAN mobile device control
+- Agentic mode for MLX and Ollama
+
+---
+
 ## Model Support
 
 Developed and tested on an Apple M2 Air (8 GB RAM) with `qwen2.5-coder:3b`. Any Ollama-compatible model should work given sufficient RAM and compute.
