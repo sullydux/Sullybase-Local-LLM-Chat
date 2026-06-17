@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-server.py — Flask backend for Sullybase Local LLM Chat v2.2.0
+server.py — Flask backend for Sullybase Local LLM Chat v2.3.0
 """
 
 import gc
@@ -26,18 +26,8 @@ APP_NAME    = "Sullybase Local LLM Chat"
 APP_VERSION = "2.2.0"
 
 AI_SYSTEM_PROMPT = (
-    "You are a helpful local AI assistant running via Ollama. "
-    "You assist with coding, science, writing, and general questions. "
-    "Be clear, concise, and technically accurate.\n\n"
-    "You have full Markdown rendering support. Use it freely:\n"
-    "• **bold**, *italic*, `inline code`\n"
-    "• # Heading 1 / ## Heading 2 / ### Heading 3\n"
-    "• Fenced code blocks with language hints (```python) for syntax highlighting\n"
-    "• - Unordered lists, 1. Ordered lists\n"
-    "• > Blockquotes\n"
-    "• | Tables | with | headers |\n"
-    "• --- Horizontal rules\n\n"
-    "Always use appropriate Markdown. Do NOT wrap everything in ```markdown."
+    "Full Markdown rendering is auto applied. "
+    "Use minimal emojis. Be clear and consise."
 )
 
 OLLAMA_BASE          = "http://localhost:11434"
@@ -257,6 +247,7 @@ class ChatStore:
 
 _DEFAULT_SETTINGS: Dict[str, Any] = {
     "model": "", "ollama_url": OLLAMA_BASE, "current_chat_id": "",
+    "custom_instructions": "",
 }
 
 
@@ -285,6 +276,10 @@ class OllamaClient:
     def __init__(self, base_url: str = OLLAMA_BASE):
         self.base_url = base_url.rstrip("/")
         self._session = requests.Session()
+
+    def set_base_url(self, base_url: str):
+        if base_url and base_url.strip():
+            self.base_url = base_url.strip().rstrip("/")
 
     def _is_online(self) -> bool:
         try:
@@ -503,6 +498,9 @@ def create_app(support_dir: Path) -> Flask:
             return jsonify({"error": "model and message required"}), 400
 
         sys_content = AI_SYSTEM_PROMPT
+        custom_instructions = (settings.get("custom_instructions", "") or "").strip()
+        if custom_instructions:
+            sys_content += "\n\n" + custom_instructions
         if ctx_files:
             sections = []
             for cf in ctx_files:
@@ -611,7 +609,10 @@ def create_app(support_dir: Path) -> Flask:
 
     @app.route("/api/settings", methods=["POST"])
     def api_settings_save():
-        settings.update(request.get_json(force=True))
+        data = request.get_json(force=True)
+        settings.update(data)
+        if "ollama_url" in data:
+            ollama.set_base_url(data.get("ollama_url", ""))
         return jsonify({"ok": True})
 
     @app.route("/api/context", methods=["POST"])

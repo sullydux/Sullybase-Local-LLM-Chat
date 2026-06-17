@@ -6,7 +6,7 @@
 
 # [Sullybase Local LLM Chat](https://sullydux.github.io/Sullybase-Local-LLM-Chat/)
 
-v2.2.0
+v2.3.0
 </div>
 
 A lightweight desktop app for chatting with local LLMs via **Ollama**. All conversations stay on your device — no external data transmission.
@@ -100,8 +100,8 @@ Ensure Ollama is installed and `ollama serve` is running. The file browser falls
 ## Updates
 
 - Gemini support
+- fix export and thinking models
 - MLX support
-- Custom instructions and settings
 - LAN mobile device control
 - Agentic mode for MLX and Ollama
 

@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════════════════════
-   Sullybase Local LLM Chat v2.2.0 — style.css
+   Sullybase Local LLM Chat v2.3.0 — style.css
    Dark mode · green accent
    ═══════════════════════════════════════════════════════════════ */
 
@@ -893,3 +893,18 @@ dialog::backdrop { background: rgba(0,0,0,.65); }
 /* ── Utility ─────────────────────────────────────────────────── */
 .hidden { display: none !important; }
 * { scrollbar-width: thin; scrollbar-color: var(--border2) transparent; }
+
+/* ── Sidebar settings link ──────────────────────────────────── */
+#btn-settings {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-size: 11.5px;
+  color: var(--text3);
+  text-decoration: none;
+  transition: background .12s, color .12s;
+}
+#btn-settings:hover { background: var(--bg3); color: var(--green-dim); }
+#btn-settings svg { flex-shrink: 0; }

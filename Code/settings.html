@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Settings — Sullybase Local LLM Chat</title>
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="settings.css">
+</head>
+<body class="settings-body">
+
+<main id="settings-main">
+  <header id="settings-topbar">
+    <a id="btn-back" href="index.html" title="Back to chat">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+        <path d="M9.5 3L4.5 8L9.5 13" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      Back to chat
+    </a>
+    <div id="settings-title-group">
+      <span class="logo-mark">◈</span>
+      <span id="settings-title">Settings</span>
+    </div>
+    <span id="settings-save-indicator" class="hidden">Saved</span>
+  </header>
+
+  <div id="settings-scroll">
+    <div id="settings-content">
+
+      <!-- ── Connection ───────────────────────────────────────── -->
+      <section class="settings-section">
+        <div class="settings-section-head">
+          <h2>Connection</h2>
+          <p>Where Ollama is running.</p>
+        </div>
+
+        <div class="field-row">
+          <label for="inp-ollama-url">Ollama URL</label>
+          <input id="inp-ollama-url" type="text" class="mono-input" placeholder="http://localhost:11434" spellcheck="false" autocomplete="off">
+        </div>
+        <div id="ollama-status" class="field-status"></div>
+
+        <div class="field-row">
+          <label for="inp-default-model">Default model</label>
+          <input id="inp-default-model" type="text" class="mono-input" placeholder="e.g. llama3.1:8b" spellcheck="false" autocomplete="off">
+        </div>
+        <p class="field-hint">Used when a chat first loads. Leave blank to keep whichever model was last selected.</p>
+      </section>
+
+      <!-- ── System instructions ─────────────────────────────────── -->
+      <section class="settings-section">
+        <div class="settings-section-head">
+          <h2>System instructions</h2>
+          <p>Sent with every message, before your conversation.</p>
+        </div>
+
+        <div class="field-row">
+          <label>Base instructions</label>
+          <div id="base-prompt-box" class="readonly-box">Full Markdown rendering auto applied. Use minimal emojis. Be clear and concise.</div>
+        </div>
+        <p class="field-hint">Always included. Not editable here.</p>
+
+        <div class="field-row">
+          <label for="inp-custom-instructions">Custom instructions</label>
+          <textarea id="inp-custom-instructions" rows="7" placeholder="e.g. I mainly write Python and TypeScript. Prefer pytest over unittest. Keep explanations short unless I ask for depth. Default to Tailwind for any frontend snippets."></textarea>
+        </div>
+        <p class="field-hint">Add anything you want the model to know every time — preferred languages or frameworks, tone, conventions, things to avoid. This is appended after the base instructions above.</p>
+
+        <div class="char-count-row">
+          <span id="char-count">0 characters</span>
+        </div>
+      </section>
+
+      <!-- ── About ─────────────────────────────────────────────── -->
+      <section class="settings-section">
+        <div class="settings-section-head">
+          <h2>About</h2>
+        </div>
+        <div class="about-row">
+          <span class="stat-key">App</span>
+          <span class="stat-val">Sullybase Local LLM Chat</span>
+        </div>
+        <div class="about-row">
+            <span class="stat-key">Version</span>
+            <span class="stat-val">v2.3.0</span>
+        </div>
+        <div class="about-row">
+          <span class="stat-key">GitHub</span>
+          <span class="stat-val">
+            <a href="https://github.com/sullydux/Sullybase-Local-LLM-Chat" target="_blank" rel="noopener noreferrer">Sullybase-Local-LLM-Chat</a>
+          </span>
+        </div>
+      </section>
+
+    </div>
+  </div>
+
+  <footer id="settings-footer">
+    <span id="settings-footer-msg"></span>
+    <div id="settings-footer-btns">
+      <button id="btn-reset" class="btn-secondary">Reset to defaults</button>
+      <button id="btn-save" class="btn-primary">Save changes</button>
+    </div>
+  </footer>
+</main>
+
+<script src="settings.js"></script>
+</body>
+</html>

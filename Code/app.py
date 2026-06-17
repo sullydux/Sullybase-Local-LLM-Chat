@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Sullybase Local LLM Chat  v2.2.0
+Sullybase Local LLM Chat  v2.3.0
 Desktop launcher — starts Flask then opens a pywebview window.
 """
 
