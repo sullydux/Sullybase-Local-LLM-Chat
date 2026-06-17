@@ -4,118 +4,108 @@
 
 <div align="center">
 
-# [Sullybase Local LLM Chat](https://sullydux.github.io/Sullybase-Local-LLM-Chat/) 
+# [Sullybase Local LLM Chat](https://sullydux.github.io/Sullybase-Local-LLM-Chat/)
 
-v1.2.0
+v2.2.0
 </div>
 
-A lightweight application for chatting with local LLMs via **Ollama**. Whether you're online or offline, Sullybase Local LLM Chat gives you full control over your AI conversations with privacy.
+A lightweight desktop app for chatting with local LLMs via **Ollama**. All conversations stay on your device — no external data transmission.
 
-[Download App](https://github.com/sullydux/Sullybase-Local-LLM-Chat/releases)
+---
+
+## Architecture
+
+The app is built on a **Flask + pywebview** stack:
+
+- `server.py` — Flask backend: Ollama API proxy, chat/settings persistence, context file loading, file browser
+- `app.py` — Desktop launcher: starts Flask in a daemon thread, waits for it to be ready, then opens a pywebview window
+- `index.html` / `app.js` / `style.css` — Frontend served by Flask as static files
+
+Chats and settings are stored as JSON files in the OS-appropriate app support directory:
+- **macOS**: `~/Library/Application Support/Sullybase-LLM-Chat/`
+- **Windows**: `%APPDATA%/Sullybase-LLM-Chat/`
+- **Linux**: `~/.config/Sullybase-LLM-Chat/`
 
 ---
 
 ## Features
 
-### Sidebar (Left)
-- **Chat History**: Browse all your past conversations  
-- **Manage Chats**: Delete unwanted conversations anytime  
-- **View-Only Mode**: Old chats open in read-only format to preserve history
+### Sidebar
+- **Model selector** with refresh button — lists all locally available Ollama models
+- **Chat history** — browse, search (with snippet preview), and switch between past conversations
+- **Stats panel** — live GPU/CPU device badge, VRAM usage bar, context window usage bar, tokens/sec
 
-### Chat Interface (Right)
-- **Real-time Messaging**: Send messages and get instant responses from your selected Ollama model  
-- **Stop Button**: Halt long responses mid-generation  
-- **Versatile Q&A**: Usefull for math, science, coding, writing, and general knowledge questions  
+### Chat Interface
+- **Streaming responses** with blinking cursor and stop button
+- **Markdown rendering** — headings, code blocks with syntax highlighting and copy button, tables, blockquotes, lists
+- **Thinking block support** — collapsible `<think>...</think>` sections for reasoning models
+- **AI-generated chat titles** with word-sliced fallback; retries on subsequent messages if the first attempt fails
+- **Export** — download chat as Markdown, JSON, or plain text
+- **Context files** — attach local files or folders (up to 2 MB per file) to inject into the system prompt; re-read from disk on each message
+
+### Performance info bar
+Shows prompt tokens ↑, completion tokens ↓, tokens/sec, first-token latency, and total generation time after each response.
 
 ---
 
 ## Requirements
 
-- **Ollama** (must be installed and running locally)  
-- Python 3.14.5+ (only if using the script version, not the bundled app)
+- **Ollama** installed and running (`ollama serve`)
+- **Python 3.14.5**
+- Dependencies: see `requirements.txt`
 
 ---
 
 ## Setup
 
-### Quick Start (macOS)
-
-1. **Download** one of the following or clone the repository to you computer:
-   - **Bundled App** (`.app` file)  
-   - **Python Script** (`.py` file) — requires Python and dependencies
-
-2. **Install Dependencies** (script version only):
+1. **Download** the `Code` folder from this repository
+2. **Install dependencies**:
    ```bash
    pip install -r requirements.txt
    ```
+3. **Run**:
+   ```bash
+   python app.py
+   ```
+4. **Connect Ollama** — open Ollama, then click **↻** in the sidebar to load models
 
-3. **Bypass Gatekeeper** (app version only):
-   - The app is not able to be signed, so you'll need to bypass macOS Gatekeeper
+### Optional: macOS Automator Shortcut
 
-4. **Run the App/Script**:
-   - It will launch and show the interface  
-   - A quick close-and-reopen at startup is **normal** — don't worry!
+You can create a double-clickable launcher using Automator:
 
-5. **Connect to Ollama**:
-   - Open the Ollama app on your system  
-   - Click **Refresh** at the top of the Sullybase interface to load available models  
-   - Select a model from the dropdown and start chatting!
+1. Open **Automator** → New Document → **Application**
+2. Add a **Run Shell Script** action
+3. Set the script to:
+   ```bash
+   cd /path/to/Code
+   python3 app.py
+   ```
+4. Save the Automator app anywhere (e.g. Applications or your Desktop)
 
-### Windows Support
+### Windows
 
-Sullybase is primarily built for macOS. To run on Windows:
-- Use the **Python script** instead of the bundled app  
-- You may need to adjust file paths or system calls in the code  
-- Ensure Ollama is installed and running on Windows
+Ensure Ollama is installed and `ollama serve` is running. The file browser falls back to tkinter on non-macOS platforms.
 
 ---
 
 ## Notes
 
-- **AI-Assisted Development**: The Python scripts were coded with AI assistance  
-- **Bundling**: The app was bundled using `py2app`  
-- **Privacy**: All conversations stay on your device—no external data transmission  
-- **Scrolling**: If it doesn't scroll correctly or at all use the scroll bar
-- **Thinking Models**: It wont show their thinking so you just have to wait
-
----
-
-## Future Updates
-
-- **Frontend**: Possible swich to html, js, and some python to get away from issues with scrolling and other stuff
-  - New Architecture.txt is my plan
-- **Gemini API Support**: Optional cloud with Gemini API, you will need your own keys
-- **Agentic Mode**: Allow user to add files to a folder and the AI will code them 
-- **Website Control**: Run the AI on device and use WiFi to conttrol it with Iphone
+- **Privacy**: All data stays local — no external network calls except to `localhost:11434` (Ollama)
+- **Logging**: Rotating logs written to the app support directory (`logs/sullybase.log`)
+- **Thinking models**: `<think>` blocks are parsed and shown as collapsible sections
+- **macOS file browser**: Uses `osascript` (AppleScript) to avoid thread-safety issues with tkinter
 
 ---
 
 ## Model Support
 
-I made and use this on a Apple M2 air with 8GB RAM, so I only use and test lesser models. I run qwen2.5-coder:3b and it works great.
-
-Besides those facts if you have enough RAM, SSD, and processing power anything on Ollama as a local model should run.
+Developed and tested on an Apple M2 Air (8 GB RAM) with `qwen2.5-coder:3b`. Any Ollama-compatible model should work given sufficient RAM and compute.
 
 ---
 
 ## Contributing
 
-Contributions are welcome! Before adding features or fixing bugs:
+1. Open an issue to discuss the change first
+2. Fork, implement, and submit a pull request
 
-1. **Ask First**: Open an issue  
-2. **Discuss**: I will accept/decline the idea and make sure it aligns with the project  
-3. **Submit**: Fork, make changes, and open a pull request
-
-Use **GitHub Issues** to notify me.
-
----
-
-## License
-
-This project is licensed under this [License](https://github.com/sullydux/Sullybase-Local-LLM-Chat/blob/main/LICENSE.txt).
-
----
-
-<div align="center">
-  Copyright © 2026 <strong>Sullydux</strong> on GitHub
-</div>
+Use **GitHub Issues** for bug reports and feature requests.

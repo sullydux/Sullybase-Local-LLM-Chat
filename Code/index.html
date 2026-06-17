@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sullybase Local LLM Chat</title>
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════ SIDEBAR -->
+<aside id="sidebar">
+  <div id="sidebar-header">
+    <div id="logo">
+      <span class="logo-mark">◈</span>
+      <div class="logo-text-group">
+        <span class="logo-title">Sullybase Local LLM Chat</span>
+        <span class="logo-version">v2.2.0</span>
+      </div>
+    </div>
+    <button id="btn-new-chat" title="New chat">+</button>
+  </div>
+
+  <div id="model-section">
+    <div class="model-label-row">
+      <label class="section-label">Model</label>
+      <button id="btn-refresh-models" title="Refresh model list" class="btn-icon-small">↻</button>
+    </div>
+    <div class="select-wrap">
+      <select id="model-select"><option value="">Loading…</option></select>
+    </div>
+  </div>
+
+  <div id="chat-list-header">
+    <span class="section-label">Chats</span>
+  </div>
+  <div id="chat-search-wrap">
+    <svg class="search-icon" width="12" height="12" viewBox="0 0 16 16" fill="none">
+      <circle cx="7" cy="7" r="5" stroke="currentColor" stroke-width="1.5"/>
+      <path d="M11 11L14.5 14.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+    </svg>
+    <input id="chat-search-input" type="text" placeholder="Search chats…" autocomplete="off" spellcheck="false">
+    <button id="chat-search-clear" class="hidden" title="Clear search">×</button>
+  </div>
+  <div id="chat-list"></div>
+
+  <div id="sidebar-footer">
+    <div id="stats-panel">
+      <div class="stats-row stats-header-row">
+        <span id="stat-device" class="stat-device-label">⬡ —</span>
+        <span id="stat-tps" class="stat-tps-label"></span>
+      </div>
+      <div class="stats-row">
+        <span class="stat-key">Model</span>
+        <span id="stat-model-info" class="stat-val">—</span>
+      </div>
+      <div class="stats-row">
+        <span class="stat-key">VRAM</span>
+        <span id="stat-vram" class="stat-val">—</span>
+      </div>
+      <div id="stat-vram-bar-wrap" class="stat-bar-wrap hidden">
+        <div id="stat-vram-bar" class="stat-bar"></div>
+      </div>
+      <div class="stats-row">
+        <span class="stat-key">Context</span>
+        <span id="stat-ctx" class="stat-val">—</span>
+      </div>
+      <div id="stat-ctx-bar-wrap" class="stat-bar-wrap hidden">
+        <div id="stat-ctx-bar" class="stat-bar"></div>
+      </div>
+    </div>
+  </div>
+</aside>
+
+<!-- ═══════════════════════════════════════════ MAIN -->
+<main id="main">
+  <header id="topbar">
+    <span id="chat-title">New chat</span>
+    <div id="topbar-right">
+      <button id="btn-context" title="Attach context files">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+          <path d="M3 8.5L8 3.5L13 8.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M8 3.5V13.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+        Context
+      </button>
+      <button id="btn-browse" title="Browse for file">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+          <rect x="1" y="3" width="14" height="11" rx="2" stroke="currentColor" stroke-width="1.5"/>
+          <path d="M1 7h14" stroke="currentColor" stroke-width="1.5"/>
+          <path d="M5 3V1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          <path d="M11 3V1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+        Browse
+      </button>
+      <button id="btn-clear" title="Clear attached context files">Clear</button>
+      <div id="export-wrap">
+        <button id="btn-export" title="Export this chat">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+            <path d="M8 1.5V10.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            <path d="M4.5 7L8 10.5L11.5 7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M2.5 13H13.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          </svg>
+          Export
+        </button>
+        <div id="export-menu" class="hidden">
+          <button data-fmt="md">Markdown (.md)</button>
+          <button data-fmt="json">JSON (.json)</button>
+          <button data-fmt="txt">Plain text (.txt)</button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- Context panel -->
+  <div id="context-panel" class="hidden">
+    <div id="context-panel-inner">
+      <div id="context-panel-title">Context Files</div>
+      <div id="context-input-row">
+        <input id="context-path-input" type="text" placeholder="/path/to/file or /folder" autocomplete="off" spellcheck="false">
+        <button id="btn-context-add">Add</button>
+      </div>
+      <div id="context-status"></div>
+      <div id="context-file-list"></div>
+    </div>
+  </div>
+
+  <!-- Messages -->
+  <div id="messages-wrap">
+    <div id="messages">
+      <div id="empty-state">
+        <div class="empty-icon">◈</div>
+        <div class="empty-title">Sullybase Local LLM Chat</div>
+        <div class="empty-sub">Local AI chat — powered by Ollama · v2.2.0</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Input area -->
+  <div id="input-area">
+    <div id="input-wrap">
+      <textarea id="user-input" placeholder="Send a message…" rows="1" autocomplete="off" spellcheck="true"></textarea>
+      <button id="btn-send" disabled title="Send (Enter)">
+        <svg class="icon-send" width="16" height="16" viewBox="0 0 16 16" fill="none">
+          <path d="M2 8H14M14 8L9 3M14 8L9 13" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <svg class="icon-stop" width="16" height="16" viewBox="0 0 16 16" fill="none">
+          <rect x="3.5" y="3.5" width="9" height="9" rx="1.5" fill="currentColor"/>
+        </svg>
+      </button>
+    </div>
+    <div id="input-meta">
+      <span id="context-badge" class="hidden">0 files</span>
+      <span id="perf-info"></span>
+    </div>
+  </div>
+</main>
+
+<!-- Delete dialog -->
+<dialog id="delete-dialog">
+  <div class="dialog-body">
+    <p>Delete this chat?</p>
+    <div class="dialog-btns">
+      <button id="delete-cancel">Cancel</button>
+      <button id="delete-confirm" class="btn-danger">Delete</button>
+    </div>
+  </div>
+</dialog>
+
+<!-- File browse input (hidden) -->
+<input type="file" id="file-picker" style="display:none">
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/9.1.6/marked.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
