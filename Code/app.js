@@ -305,7 +305,7 @@ function showEmpty(show) {
     es.innerHTML = `
       <div class="empty-icon">◈</div>
       <div class="empty-title">Sullybase Local LLM Chat</div>
-      <div class="empty-sub">Local AI chat — powered by Ollama · v2.2.0</div>`;
+      <div class="empty-sub">Local AI chat — powered by Ollama · v2.3.0</div>`;
     els.messages.prepend(es);
   }
   es.style.display = show ? "flex" : "none";

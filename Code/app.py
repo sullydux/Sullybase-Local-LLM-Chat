@@ -14,7 +14,7 @@ import logging.handlers
 from pathlib import Path
 
 APP_NAME    = "Sullybase Local LLM Chat"
-APP_VERSION = "2.2.0"
+APP_VERSION = "2.3.0"
 APP_BUNDLE  = "Sullybase-LLM-Chat"
 FLASK_HOST  = "127.0.0.1"
 FLASK_PORT  = 5050

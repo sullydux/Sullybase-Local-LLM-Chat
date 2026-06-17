@@ -23,10 +23,10 @@ from flask import Flask, Response, jsonify, request, send_from_directory, stream
 logger = logging.getLogger("sullybase")
 
 APP_NAME    = "Sullybase Local LLM Chat"
-APP_VERSION = "2.2.0"
+APP_VERSION = "2.3.0"
 
 AI_SYSTEM_PROMPT = (
-    "Full Markdown rendering is auto applied. "
+    "Full Markdown rendering is supported — use it where it helps. "
     "Use minimal emojis. Be clear and consise."
 )
 
