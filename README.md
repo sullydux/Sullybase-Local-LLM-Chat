@@ -99,11 +99,7 @@ Ensure Ollama is installed and `ollama serve` is running. The file browser falls
 
 ## Updates
 
-- Gemini support
-- fix export and thinking models
-- MLX support
-- LAN mobile device control
-- Agentic mode for MLX and Ollama
+- delete export and thinking models
 
 ---
 
