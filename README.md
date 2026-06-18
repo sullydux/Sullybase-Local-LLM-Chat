@@ -99,7 +99,9 @@ Ensure Ollama is installed and `ollama serve` is running. The file browser falls
 
 ## Updates
 
-- delete export and thinking models
+- delete export
+- thinking models show thinking
+- stats checked to work
 
 ---
 
