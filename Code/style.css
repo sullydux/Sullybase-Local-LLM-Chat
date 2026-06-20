@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════════════════════
-   Sullybase Local LLM Chat v2.3.0 — style.css
+   Sullybase Local LLM Chat v2.4.0 — style.css
    Dark mode · green accent
    ═══════════════════════════════════════════════════════════════ */
 
@@ -438,37 +438,6 @@ option { background: var(--bg3); }
 #topbar-right button:hover { border-color: var(--green-dim); color: var(--green); }
 #btn-context.active { border-color: var(--green-dim); color: var(--green); background: var(--green-glow); }
 
-/* ── Export menu ────────────────────────────────────────────── */
-#export-wrap { position: relative; }
-
-#export-menu {
-  position: absolute;
-  top: calc(100% + 6px);
-  right: 0;
-  background: var(--bg3);
-  border: 1px solid var(--border2);
-  border-radius: 8px;
-  padding: 4px;
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  min-width: 150px;
-  box-shadow: 0 8px 24px rgba(0,0,0,.35);
-  z-index: 20;
-}
-#export-menu.hidden { display: none; }
-#export-menu button {
-  padding: 7px 10px;
-  border-radius: 5px;
-  font-size: 12px;
-  text-align: left;
-  color: var(--text2);
-  background: none;
-  transition: background .12s, color .12s;
-  white-space: nowrap;
-}
-#export-menu button:hover { background: var(--green-glow); color: var(--green); }
-
 /* ── Context panel ──────────────────────────────────────────── */
 #context-panel {
   border-bottom: 1px solid var(--border);
@@ -893,6 +862,97 @@ dialog::backdrop { background: rgba(0,0,0,.65); }
 /* ── Utility ─────────────────────────────────────────────────── */
 .hidden { display: none !important; }
 * { scrollbar-width: thin; scrollbar-color: var(--border2) transparent; }
+
+/* ── Scroll-to-bottom button ─────────────────────────────────── */
+/* Floating over the lower-right of #messages-wrap (which is
+   position:relative). Hidden by default; .hidden removes it
+   outright, so toggling both classes gives us the fade. */
+#messages-wrap { position: relative; }
+
+#btn-scroll-bottom {
+  position: absolute;
+  right: 18px;
+  bottom: 14px;
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  color: var(--text2);
+  background: var(--bg3);
+  border: 1px solid var(--border2);
+  box-shadow: 0 2px 8px rgba(0,0,0,.35);
+  cursor: pointer;
+  opacity: 0;
+  transform: translateY(6px);
+  transition: opacity .15s, transform .15s, border-color .15s, color .15s;
+  pointer-events: none;
+  z-index: 5;
+}
+#btn-scroll-bottom.show {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+#btn-scroll-bottom:hover {
+  color: var(--green);
+  border-color: var(--green-dim);
+}
+
+/* ── Message timestamps & hover actions ──────────────────────── */
+.msg-ts {
+  font-size: 9px;
+  color: var(--text3);
+  padding: 0 4px;
+  margin-bottom: 1px;
+  letter-spacing: .02em;
+  font-family: var(--mono);
+  opacity: .8;
+}
+
+/* Per-message action row (regenerate / edit / copy). Hidden until
+   the message is hovered, mirroring the .chat-item-del pattern. */
+.msg-actions {
+  display: flex;
+  gap: 4px;
+  margin-top: 3px;
+  padding: 0 4px;
+  opacity: 0;
+  transition: opacity .15s;
+}
+.msg:hover .msg-actions { opacity: 1; }
+.msg-actions button {
+  font-size: 10px;
+  color: var(--text3);
+  padding: 2px 7px;
+  border-radius: 4px;
+  border: 1px solid var(--border2);
+  background: var(--bg4);
+  transition: color .15s, border-color .15s;
+  cursor: pointer;
+}
+.msg-actions button:hover { color: var(--green); border-color: var(--green-dim); }
+
+/* Inline edit box for user messages. Matches the user-bubble palette. */
+.msg-edit-wrap { display: flex; flex-direction: column; gap: 6px; width: 100%; }
+.msg-edit-area {
+  width: 100%;
+  min-height: 60px;
+  max-height: 220px;
+  resize: vertical;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--green-dark);
+  background: var(--bg3);
+  color: var(--text);
+  font: inherit;
+  font-size: 13.5px;
+  line-height: 1.5;
+  font-family: var(--mono);
+}
+.msg-edit-area:focus { outline: none; border-color: var(--green-dim); }
+.msg-edit-btns { display: flex; gap: 6px; justify-content: flex-end; }
 
 /* ── Sidebar settings link ──────────────────────────────────── */
 #btn-settings {

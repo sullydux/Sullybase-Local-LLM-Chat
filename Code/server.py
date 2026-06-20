@@ -1,18 +1,21 @@
 #!/usr/bin/env python3
 """
-server.py — Flask backend for Sullybase Local LLM Chat v2.3.0
+server.py — Flask backend for Sullybase Local LLM Chat v2.4.0
 """
 
 import gc
 import json
 import logging
 import os
-import sys
+import platform
 import re
+import shutil
+import subprocess
+import sys
 import threading
 import time
 import traceback
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Generator, List, Optional, Tuple
@@ -22,11 +25,24 @@ from flask import Flask, Response, jsonify, request, send_from_directory, stream
 
 logger = logging.getLogger("sullybase")
 
-APP_NAME    = "Sullybase Local LLM Chat"
-APP_VERSION = "2.3.0"
+APP_NAME = "Sullybase Local LLM Chat"
+
+
+def _load_version() -> str:
+    """Single source of truth for the app version. Reads version.txt next to
+    this file; falls back to a hard-coded value only if the file is missing or
+    blank so the app still boots in unusual packaging situations."""
+    try:
+        v = (Path(__file__).parent / "version.txt").read_text(encoding="utf-8").strip()
+        return v or "2.4.0"
+    except Exception:
+        return "2.4.0"
+
+
+APP_VERSION = _load_version()
 
 AI_SYSTEM_PROMPT = (
-    "Full Markdown rendering is supported — use it where it helps. "
+    "Full Markdown rendering is auto applied. "
     "Use minimal emojis. Be clear and consise."
 )
 
@@ -65,11 +81,15 @@ ALLOWED_TEXT_EXTS: set = {
 class ChatMessage:
     role: str
     content: str
+    ts: str = ""
 
-    def to_dict(self): return asdict(self)
+    def to_dict(self):
+        return {"role": self.role, "content": self.content, "ts": self.ts}
 
     @classmethod
-    def from_dict(cls, d): return cls(role=d.get("role",""), content=d.get("content",""))
+    def from_dict(cls, d):
+        return cls(role=d.get("role",""), content=d.get("content",""),
+                   ts=d.get("ts",""))
 
 
 @dataclass
@@ -272,6 +292,46 @@ class SettingsStore:
 
 # ── Ollama client ─────────────────────────────────────────────────────────────
 
+def _is_apple_silicon() -> bool:
+    """True on Apple Silicon Macs (arm64/aarch64 + darwin). Used to label the
+    accelerator as 'Metal' and treat GPU memory as unified system memory."""
+    return sys.platform == "darwin" and platform.machine().lower() in ("arm64", "aarch64")
+
+
+def _total_system_memory_mb() -> int:
+    """Best-effort total physical memory in MB, dependency-free. Returns 0 if
+    we can't determine it (e.g. unsupported platform). On Apple Silicon this is
+    the unified-memory total, which is what the model actually draws from."""
+    try:
+        if sys.platform == "darwin":
+            out = subprocess.check_output(["sysctl", "-n", "hw.memsize"], timeout=4).strip()
+            return int(out) // (1024 * 1024)
+        if sys.platform.startswith("linux"):
+            with open("/proc/meminfo", "r", encoding="utf-8") as f:
+                for line in f:
+                    if line.startswith("MemTotal:"):
+                        return int(line.split()[1]) // 1024
+        if sys.platform == "win32":
+            import ctypes
+            class MEMORYSTATUSEX(ctypes.Structure):
+                _fields_ = [("dwLength", ctypes.c_ulong),
+                            ("dwMemoryLoad", ctypes.c_ulong),
+                            ("ullTotalPhys", ctypes.c_ulonglong),
+                            ("ullAvailPhys", ctypes.c_ulonglong),
+                            ("ullTotalPageFile", ctypes.c_ulonglong),
+                            ("ullAvailPageFile", ctypes.c_ulonglong),
+                            ("ullTotalVirtual", ctypes.c_ulonglong),
+                            ("ullAvailVirtual", ctypes.c_ulonglong),
+                            ("ullAvailExtendedVirtual", ctypes.c_ulonglong)]
+            stat = MEMORYSTATUSEX()
+            stat.dwLength = ctypes.sizeof(stat)
+            ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(stat))
+            return stat.ullTotalPhys // (1024 * 1024)
+    except Exception as exc:
+        logger.debug(f"_total_system_memory_mb: {exc}")
+    return 0
+
+
 class OllamaClient:
     def __init__(self, base_url: str = OLLAMA_BASE):
         self.base_url = base_url.rstrip("/")
@@ -321,23 +381,71 @@ class OllamaClient:
             logger.debug(f"get_model_info: {exc}")
         return result
 
-    def get_ps_info(self) -> dict:
-        result = {"vram_used_mb": 0, "vram_free_mb": 0, "vram_total_mb": 0, "device": ""}
+    def get_ps_info(self, model: str = "") -> dict:
+        """Runtime stats for the currently loaded model.
+
+        Robust across platforms: on Apple Silicon the GPU memory is unified
+        with system memory, so the 'VRAM' total is really the physical RAM
+        total and we mark memory_kind='unified' so the UI can label it
+        'Memory' instead. On discrete-GPU machines we read the per-device
+        totals from /api/ps gpu_info. Everything degrades gracefully — missing
+        fields default to 0/empty so the panel never crashes.
+        """
+        result: Dict[str, Any] = {
+            "vram_used_mb": 0, "vram_free_mb": 0, "vram_total_mb": 0,
+            "device": "", "accelerator": "",
+            "resident_mb": 0, "model_loaded": False,
+            "num_gpu_layers": 0, "memory_kind": "",
+        }
         try:
             r = self._session.get(f"{self.base_url}/api/ps", timeout=5)
             r.raise_for_status()
             data = r.json()
             models_list = data.get("models", [])
             if not models_list: return result
-            m = models_list[0]
-            size_vram = m.get("size_vram", 0)
-            result["vram_used_mb"] = size_vram // (1024 * 1024)
-            num_gpu = m.get("details", {}).get("num_gpu_layers", -1)
-            result["device"] = "GPU" if (num_gpu > 0 or size_vram > 0) else "CPU"
+
+            # Prefer the selected model; fall back to the first loaded one so
+            # the panel still shows something useful after a model switch.
+            m = next((x for x in models_list if x.get("name") == model), models_list[0])
+
+            size_vram     = m.get("size_vram", 0)
+            size_total    = m.get("size", 0)               # full footprint (RAM + VRAM)
+            num_gpu       = m.get("details", {}).get("num_gpu_layers", 0)
+            gpu_offloaded = num_gpu > 0 or size_vram > 0
+
+            result["vram_used_mb"]  = size_vram // (1024 * 1024)
+            result["resident_mb"]   = size_total // (1024 * 1024)
+            result["num_gpu_layers"] = num_gpu
+            result["model_loaded"]  = True
+
+            # Accelerator label. Apple Silicon reports Metal; other GPUs stay
+            # 'GPU'; no offload means the model runs on the CPU.
+            if gpu_offloaded:
+                result["accelerator"] = "Metal" if _is_apple_silicon() else "GPU"
+            else:
+                result["accelerator"] = "CPU"
+            # Keep legacy 'device' field in sync for any older callers.
+            result["device"] = result["accelerator"]
+
             gpu_info = data.get("gpu_info", [])
             if gpu_info:
-                result["vram_total_mb"] = sum(g.get("total_memory",0) for g in gpu_info) // (1024*1024)
-                result["vram_free_mb"]  = sum(g.get("free_memory", 0) for g in gpu_info) // (1024*1024)
+                result["vram_total_mb"] = sum(g.get("total_memory", 0) for g in gpu_info) // (1024 * 1024)
+                result["vram_free_mb"]  = sum(g.get("free_memory",  0) for g in gpu_info) // (1024 * 1024)
+
+            # On Apple Silicon (and other unified-memory machines) Ollama often
+            # doesn't report gpu_info, but the model still lives in system RAM.
+            # Use the physical memory total as the ceiling and flag it as
+            # unified so the UI labels it correctly.
+            if _is_apple_silicon():
+                result["memory_kind"] = "unified"
+                if not result["vram_total_mb"]:
+                    result["vram_total_mb"] = _total_system_memory_mb()
+                # On unified memory the model's full footprint (size) is the
+                # meaningful 'used' figure when size_vram is 0/unreliable.
+                if not result["vram_used_mb"] and result["resident_mb"]:
+                    result["vram_used_mb"] = result["resident_mb"]
+                if result["vram_total_mb"] and result["vram_used_mb"]:
+                    result["vram_free_mb"] = max(0, result["vram_total_mb"] - result["vram_used_mb"])
         except Exception as exc:
             logger.debug(f"get_ps_info: {exc}")
         return result
@@ -348,7 +456,11 @@ class OllamaClient:
         rather than treating this as a final answer."""
         convo = f"User: {user_text[:400]}"
         if reply_text:
-            convo += f"\nAssistant: {reply_text[:400]}"
+            # Drop any <think> reasoning so the title model only sees the actual
+            # answer — reasoning text wastes the context budget and can derail
+            # the summary.
+            clean_reply = re.sub(r"<think>[\s\S]*?</think>", "", reply_text, flags=re.IGNORECASE).strip()
+            convo += f"\nAssistant: {clean_reply[:400]}"
 
         prompt = (
             "Summarize the topic of this chat in a short title.\n\n"
@@ -414,17 +526,51 @@ class OllamaClient:
             first_token_sent = False
             t_start = time.monotonic()
 
+            # Thinking models (e.g. qwen3, deepseek-r1) stream their reasoning
+            # in a separate `message.thinking` field, distinct from the answer
+            # in `message.content`. The frontend renders a collapsible block
+            # for anything wrapped in <think>…</think>, so we wrap the thinking
+            # deltas here. Track whether we're currently inside a thinking
+            # section so we emit a single opening <think> when reasoning starts
+            # and a closing </think> when the answer begins.
+            in_thinking = False
+
             for raw_line in resp.iter_lines():
                 if not raw_line: continue
                 try: data = json.loads(raw_line)
                 except json.JSONDecodeError: continue
 
-                tok = data.get("message", {}).get("content", "")
+                msg       = data.get("message", {}) or {}
+                think_tok = msg.get("thinking", "") or ""
+                tok       = msg.get("content", "") or ""
+
+                # Build the ordered list of pieces to emit for this chunk:
+                # thinking deltas (wrapped once on first arrival), then any
+                # answer content (closing the think block if open).
+                pieces: List[str] = []
+                if think_tok:
+                    if not in_thinking:
+                        in_thinking = True
+                        pieces.append("<think>")
+                    pieces.append(think_tok)
                 if tok:
+                    if in_thinking:
+                        in_thinking = False
+                        pieces.append("</think>")
+                    pieces.append(tok)
+
+                for piece in pieces:
                     if not first_token_sent:
                         first_token_sent = True
                         yield _sse("first_token", {"ms": round((time.monotonic() - t_start)*1000)})
-                    yield _sse("token", {"token": tok})
+                    yield _sse("token", {"token": piece})
+
+                # Safety net: if the stream ends while still inside a thinking
+                # block (e.g. model stopped mid-reasoning), close it so the
+                # frontend doesn't leave an unclosed tag.
+                if data.get("done") and in_thinking:
+                    yield _sse("token", {"token": "</think>"})
+                    in_thinking = False
 
                 if data.get("done"):
                     gen_ms = round((time.monotonic() - t_start) * 1000)
@@ -482,7 +628,7 @@ def create_app(support_dir: Path) -> Flask:
     @app.route("/api/ps")
     def api_ps():
         model = request.args.get("model", "")
-        ps   = ollama.get_ps_info()
+        ps   = ollama.get_ps_info(model)
         info = ollama.get_model_info(model) if model else {}
         return jsonify({**ps, **info})
 
@@ -496,6 +642,10 @@ def create_app(support_dir: Path) -> Flask:
 
         if not model or not user_text:
             return jsonify({"error": "model and message required"}), 400
+
+        logger.info(f"chat request ts={datetime.now().isoformat(timespec='seconds')} "
+                    f"model={model} history_turns={len(history)} "
+                    f"prompt_chars={len(user_text)} context_files={len(ctx_files)}")
 
         sys_content = AI_SYSTEM_PROMPT
         custom_instructions = (settings.get("custom_instructions", "") or "").strip()
@@ -605,7 +755,7 @@ def create_app(support_dir: Path) -> Flask:
         return jsonify({"ok": True})
 
     @app.route("/api/settings", methods=["GET"])
-    def api_settings_get(): return jsonify(settings.get_all())
+    def api_settings_get(): return jsonify({**settings.get_all(), "version": APP_VERSION})
 
     @app.route("/api/settings", methods=["POST"])
     def api_settings_save():
@@ -641,7 +791,6 @@ def create_app(support_dir: Path) -> Flask:
         SIGTRAP / trace-trap and kills the process.  On other platforms we fall
         back to tkinter with a threading workaround.
         """
-        import subprocess
         body   = request.get_json(force=True) or {}
         mode   = body.get("mode", "file")   # "file" | "folder"
         chosen = None

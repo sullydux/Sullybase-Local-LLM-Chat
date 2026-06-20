@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════════════════════
-   Sullybase Local LLM Chat v2.3.0 — app.js
+   Sullybase Local LLM Chat v2.4.0 — app.js
    ═══════════════════════════════════════════════════════════════ */
 
 // ── API helpers ───────────────────────────────────────────────────────────────
@@ -38,6 +38,7 @@ const state = {
   titleOk:       false, // whether the AI-generated title succeeded for this chat
   abortCtrl:     null, // AbortController for the in-flight stream
   searchQuery:   "",
+  appVersion:    "",
 };
 
 // ── Marked setup ──────────────────────────────────────────────────────────────
@@ -67,6 +68,7 @@ const els = {
   chatTitle:        $("chat-title"),
   messages:         $("messages"),
   messagesWrap:     $("messages-wrap"),
+  btnScrollBottom:  $("btn-scroll-bottom"),
   userInput:        $("user-input"),
   btnSend:          $("btn-send"),
   btnNewChat:       $("btn-new-chat"),
@@ -74,8 +76,6 @@ const els = {
   btnContext:       $("btn-context"),
   btnBrowse:        $("btn-browse"),
   btnClear:         $("btn-clear"),
-  btnExport:        $("btn-export"),
-  exportMenu:       $("export-menu"),
   contextPanel:     $("context-panel"),
   contextPathInput: $("context-path-input"),
   btnContextAdd:    $("btn-context-add"),
@@ -85,6 +85,7 @@ const els = {
   perfInfo:         $("perf-info"),
   statDevice:       $("stat-device"),
   statVram:         $("stat-vram"),
+  statVramKey:      $("stat-vram-key"),
   statVramBar:      $("stat-vram-bar"),
   statVramBarWrap:  $("stat-vram-bar-wrap"),
   statCtx:          $("stat-ctx"),
@@ -112,6 +113,15 @@ async function loadSettings() {
     const s = await API.settings();
     if (s.model) state.model = s.model;
     if (s.current_chat_id) state.chatId = s.current_chat_id;
+    if (s.version) {
+      state.appVersion = s.version;
+      const vStr = "v" + s.version;
+      const logoVer = $("logo-version");
+      if (logoVer) logoVer.textContent = vStr;
+      const emptyVer = $("empty-version");
+      if (emptyVer) emptyVer.textContent = vStr;
+      document.title = "Sullybase Local LLM Chat " + vStr;
+    }
   } catch(_) {}
 }
 
@@ -261,6 +271,7 @@ async function loadChat(id) {
     renderMessages();
     renderContextFiles();
     setActiveChatItem(id);
+    loadDraft();
     saveSettings();
   } catch(_) { newChat(); }
 }
@@ -275,10 +286,12 @@ function newChat() {
   els.perfInfo.textContent  = "";
   els.statTps.textContent   = "";
   els.statTps.className     = "stat-tps-label";
+  els.btnScrollBottom.classList.remove("show");
   renderMessages();
   renderContextFiles();
   setActiveChatItem(null);
   updateCtxStat();
+  loadDraft();
   saveSettings();
 }
 
@@ -293,8 +306,9 @@ function renderMessages() {
   els.messages.innerHTML = "";
   if (!state.messages.length) { showEmpty(true); return; }
   showEmpty(false);
-  state.messages.forEach(m => appendMessage(m.role, m.content, false));
+  state.messages.forEach(m => appendMessage(m.role, m.content, false, m.ts || ""));
   scrollBottom(false);
+  refreshMsgActions();
 }
 
 function showEmpty(show) {
@@ -302,16 +316,17 @@ function showEmpty(show) {
   if (!es) {
     es = document.createElement("div");
     es.id = "empty-state";
+    const vStr = state.appVersion ? "v" + state.appVersion : "v…";
     es.innerHTML = `
       <div class="empty-icon">◈</div>
       <div class="empty-title">Sullybase Local LLM Chat</div>
-      <div class="empty-sub">Local AI chat — powered by Ollama · v2.3.0</div>`;
+      <div class="empty-sub">Local AI chat — powered by Ollama · <span id="empty-version">${vStr}</span></div>`;
     els.messages.prepend(es);
   }
   es.style.display = show ? "flex" : "none";
 }
 
-function appendMessage(role, content, stream=false) {
+function appendMessage(role, content, stream=false, ts="") {
   showEmpty(false);
 
   const modelName = state.model
@@ -320,10 +335,21 @@ function appendMessage(role, content, stream=false) {
 
   const wrap  = document.createElement("div");
   wrap.className = `msg ${role}`;
+  wrap.dataset.role = role;
+
+  // Assistant messages get a dim timestamp above the label. User
+  // messages don't (per spec) — keeps the user side clean.
+  if (role === "assistant" && ts) {
+    const tsEl = document.createElement("div");
+    tsEl.className = "msg-ts";
+    tsEl.textContent = fmtTs(ts);
+    wrap.appendChild(tsEl);
+  }
 
   const label = document.createElement("div");
   label.className = "msg-label";
   label.textContent = role === "user" ? "You" : modelName;
+  wrap.appendChild(label);
 
   const body = document.createElement("div");
   body.className = "msg-body" + (stream ? " streaming" : "");
@@ -334,25 +360,111 @@ function appendMessage(role, content, stream=false) {
   } else {
     body.textContent = content;
   }
-
-  wrap.appendChild(label);
   wrap.appendChild(body);
+
+  // Hover action row. Only attach for finalized (non-streaming)
+  // messages — the streaming assistant bubble gets its actions once
+  // it completes, in finishStream.
+  if (!stream) appendMsgActions(wrap, role);
+
   els.messages.appendChild(wrap);
   return body;
 }
 
-function renderAssistantContent(raw) {
-  let thinkHtml = "";
-  const cleaned = raw.replace(/<think>([\s\S]*?)<\/think>/gi, (_, inner) => {
-    thinkHtml += makeThinkBlock(inner.trim());
-    return "";
-  }).trim();
-  return thinkHtml + marked.parse(cleaned || "");
+// Format an ISO timestamp as "2:45 PM" when same day as now, else a
+// short date like "Jun 18". Used for the assistant message label.
+function fmtTs(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (isNaN(d)) return "";
+  const now = new Date();
+  const sameDay = d.getFullYear() === now.getFullYear()
+    && d.getMonth() === now.getMonth()
+    && d.getDate() === now.getDate();
+  if (sameDay) {
+    let h = d.getHours();
+    const m = String(d.getMinutes()).padStart(2, "0");
+    const ampm = h >= 12 ? "PM" : "AM";
+    h = h % 12 || 12;
+    return `${h}:${m} ${ampm}`;
+  }
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
-function makeThinkBlock(text) {
-  return `<div class="think-block">
-    <button class="think-toggle"><span class="think-chevron">▶</span> Thinking</button>
+// Build the hover action buttons for a message. Regenerate only
+// applies to the *last* assistant message — the caller is
+// responsible for stripping it from older ones (refreshMsgActions).
+function appendMsgActions(wrap, role) {
+  const row = document.createElement("div");
+  row.className = "msg-actions";
+
+  if (role === "assistant") {
+    const regen = document.createElement("button");
+    regen.type = "button";
+    regen.className = "btn-regen";
+    regen.textContent = "↻ Regenerate";
+    regen.title = "Regenerate reply";
+    regen.addEventListener("click", () => regenerateAt(wrap));
+    row.appendChild(regen);
+  } else {
+    const edit = document.createElement("button");
+    edit.type = "button";
+    edit.className = "btn-edit";
+    edit.textContent = "✎ Edit";
+    edit.title = "Edit & resend";
+    edit.addEventListener("click", () => beginEdit(wrap));
+    row.appendChild(edit);
+  }
+
+  wrap.appendChild(row);
+}
+
+// After a render or a new reply, only the final assistant message
+// should show Regenerate. Walk the list and hide/remove the action
+// row on every assistant message except the last one.
+function refreshMsgActions() {
+  const assistantMsgs = els.messages.querySelectorAll(".msg.assistant");
+  assistantMsgs.forEach((m, i, arr) => {
+    const isLast = i === arr.length - 1;
+    let row = m.querySelector(".msg-actions");
+    if (isLast && !row) appendMsgActions(m, "assistant");
+    else if (!isLast && row) row.remove();
+  });
+}
+
+function renderAssistantContent(raw) {
+  // Captures both fully-closed <think>…</think> blocks and an unclosed
+  // <think>… running to the end of the stream. Thinking models emit the
+  // opening tag first and stream their reasoning token-by-token before the
+  // closing tag arrives, so the trailing-`$` alternative is what keeps that
+  // live reasoning inside the collapsible block instead of leaking into the
+  // rendered answer.
+  let thinkHtml = "";
+  let clean     = "";
+  let last      = 0;
+  const re = /<think>([\s\S]*?)(<\/think>|$)/gi;
+  let m;
+  while ((m = re.exec(raw)) !== null) {
+    clean    += raw.slice(last, m.index);
+    const inner  = m[1].trim();
+    const closed = m[2].toLowerCase() === "</think>";
+    // Skip empty closed blocks (e.g. a non-thinking model echoing the tags)
+    // but always render a live one so the streaming cursor has a home.
+    if (inner || !closed) thinkHtml += makeThinkBlock(inner, !closed);
+    last = m.index + m[0].length;
+  }
+  clean += raw.slice(last);
+  return thinkHtml + marked.parse(clean.trim() || "");
+}
+
+function makeThinkBlock(text, streaming=false) {
+  // While streaming (no closing tag yet) keep the block expanded so the user
+  // can watch the reasoning arrive live; once closed it collapses to a summary
+  // they can re-expand on demand.
+  const open  = streaming ? " open" : "";
+  const label = streaming ? "Thinking…" : "Thought process";
+  return `<div class="think-block${open}">
+    <button class="think-toggle"><span class="think-chevron">▶</span> ${label}</button>
     <div class="think-body">${escHtml(text)}</div>
   </div>`;
 }
@@ -401,9 +513,11 @@ async function sendMessage() {
   if (!model) { showStatus("Select a model — is Ollama running?", "err"); return; }
 
   showEmpty(false);
-  state.messages.push({role: "user", content: text});
-  appendMessage("user", text);
+  const userTs = new Date().toISOString();
+  state.messages.push({role: "user", content: text, ts: userTs});
+  appendMessage("user", text, false, userTs);
   els.userInput.value = "";
+  clearDraft();
   resizeTextarea();
   setSendingUI(true);
   scrollBottom();
@@ -411,14 +525,31 @@ async function sendMessage() {
   const assistantBody = appendMessage("assistant", "", true);
   scrollBottom();
 
+  await runStream(model, state.messages.slice(0, -1), text, assistantBody);
+}
+
+// Shared streaming core used by sendMessage, regenerateAt and
+// beginEdit's save. Streams from /api/chat into the given assistant
+// body element, updating state.messages and persisting on completion.
+// `history` is the conversation before the final user turn; `userText`
+// is that final user prompt (already pushed to state.messages by the
+// caller when sending new, but for regenerate there is no new user
+// turn — see the override below).
+async function runStream(model, history, userText, assistantBody, opts={}) {
+  // For regenerate: we reuse the existing trailing user turn as the
+  // prompt and stream a fresh assistant reply into a fresh body.
+  const sendingNew = !opts.regenerate;
+  if (sendingNew) {
+    state.messages.push({role: "assistant", content: ""});
+  }
+
   state.streaming    = true;
   state.firstTokenMs = 0;
+  state.abortCtrl    = new AbortController();
   els.perfInfo.textContent = "⏳ Waiting…";
 
   let accumulated = "";
   let lastEvent   = "";
-
-  state.abortCtrl = new AbortController();
 
   try {
     const resp = await fetch("/api/chat", {
@@ -427,8 +558,8 @@ async function sendMessage() {
       signal: state.abortCtrl.signal,
       body: JSON.stringify({
         model,
-        history:       state.messages.slice(0, -1),
-        message:       text,
+        history,
+        message:       userText,
         context_files: state.contextFiles,
       }),
     });
@@ -458,7 +589,17 @@ async function sendMessage() {
 
         if (lastEvent === "token") {
           accumulated += payload.token || "";
+          // Preserve the user's manual collapse of a live thinking block across
+          // the full re-render below — otherwise it snaps back open on the
+          // next token (the block auto-expands while its closing tag hasn't
+          // arrived yet).
+          const prevThink = assistantBody.querySelector(".think-block");
+          const userCollapsed = prevThink && !prevThink.classList.contains("open");
           assistantBody.innerHTML = renderAssistantContent(accumulated);
+          if (userCollapsed) {
+            const fresh = assistantBody.querySelector(".think-block");
+            if (fresh) fresh.classList.remove("open");
+          }
           const cur = document.createElement("span");
           cur.className = "stream-cursor";
           assistantBody.appendChild(cur);
@@ -494,15 +635,127 @@ async function sendMessage() {
   if (state.streaming) finishStream(assistantBody, accumulated, {});
 }
 
+// Regenerate the assistant reply whose .msg wrapper is `wrap`. Drops
+// that reply from state and re-streams from the preceding user turn.
+async function regenerateAt(wrap) {
+  if (state.streaming) return;
+  const model = els.modelSelect.value;
+  if (!model) { showStatus("Select a model — is Ollama running?", "err"); return; }
+
+  // Find this message's index among rendered messages so we can line
+  // it up with state.messages (they share order: user/assistant pairs).
+  const allMsgs = [...els.messages.querySelectorAll(".msg")];
+  const idx = allMsgs.indexOf(wrap);
+  if (idx === -1) return;
+
+  // Truncate state to everything before this assistant reply, then
+  // drop the assistant turn itself; the trailing user turn becomes
+  // the prompt for the regeneration.
+  state.messages = state.messages.slice(0, idx);
+  const userTurn = state.messages[state.messages.length - 1];
+  if (!userTurn || userTurn.role !== "user") return;
+  const userText = userTurn.content;
+  const history  = state.messages.slice(0, -1);
+
+  // Replace the old reply bubble with a fresh streaming one in place.
+  const freshBody = document.createElement("div");
+  freshBody.className = "msg-body streaming";
+  const oldBody = wrap.querySelector(".msg-body");
+  oldBody.replaceWith(freshBody);
+  // Drop any stale action row so finishStream can re-add the new one.
+  wrap.querySelector(".msg-actions")?.remove();
+
+  setSendingUI(true);
+  await runStream(model, history, userText, freshBody, {regenerate: true});
+}
+
+// Inline-edit a user message: swap its body for a textarea. Save
+// truncates the conversation to that point and regenerates from the
+// edited prompt (discard-and-resend, per the chosen behavior).
+function beginEdit(wrap) {
+  if (state.streaming) return;
+  const allMsgs = [...els.messages.querySelectorAll(".msg")];
+  const idx = allMsgs.indexOf(wrap);
+  if (idx === -1) return;
+
+  const body = wrap.querySelector(".msg-body");
+  if (!body || wrap.querySelector(".msg-edit-wrap")) return; // already editing
+
+  const original = state.messages[idx]?.content || "";
+  const holder = document.createElement("div");
+  holder.className = "msg-edit-wrap";
+  const area = document.createElement("textarea");
+  area.className = "msg-edit-area";
+  area.value = original;
+  const btns = document.createElement("div");
+  btns.className = "msg-edit-btns";
+  const cancel = document.createElement("button");
+  cancel.type = "button"; cancel.textContent = "Cancel";
+  cancel.className = "btn-copy";
+  const save = document.createElement("button");
+  save.type = "button"; save.textContent = "Save & resend";
+  save.className = "btn-copy";
+  btns.appendChild(cancel); btns.appendChild(save);
+  holder.appendChild(area); holder.appendChild(btns);
+  body.replaceWith(holder);
+  area.focus();
+  // Grow to fit and place the cursor at the end.
+  const grow = () => { area.style.height = "auto"; area.style.height = Math.min(area.scrollHeight, 220) + "px"; };
+  area.addEventListener("input", grow); grow();
+  area.setSelectionRange(area.value.length, area.value.length);
+
+  cancel.addEventListener("click", () => renderMessages());
+
+  save.addEventListener("click", async () => {
+    const next = area.value.trim();
+    if (!next || !area.value.trim()) { renderMessages(); return; }
+
+    // Truncate everything from this user message onward, then push the
+    // edited text as the new prompt and regenerate the assistant reply.
+    state.messages = state.messages.slice(0, idx);
+    const userTs = new Date().toISOString();
+    state.messages.push({role: "user", content: next, ts: userTs});
+
+    renderMessages();
+    setSendingUI(true);
+    const assistantBody = appendMessage("assistant", "", true);
+    scrollBottom();
+
+    const model = els.modelSelect.value;
+    if (!model) { showStatus("Select a model — is Ollama running?", "err"); return; }
+    await runStream(model, state.messages.slice(0, -1), next, assistantBody);
+  });
+}
+
 function finishStream(bodyEl, content, stats) {
   if (!state.streaming) return;
   state.streaming = false;
   state.abortCtrl = null;
   setSendingUI(false);
 
+  const assistantTs = new Date().toISOString();
+
   bodyEl.classList.remove("streaming");
   bodyEl.innerHTML = renderAssistantContent(content);
   addCopyListeners(bodyEl);
+
+  // Attach the timestamp + hover-action row to this message wrapper
+  // (the streaming bubble had neither), then re-evaluate which
+  // assistant message owns the Regenerate button.
+  const wrap = bodyEl.closest(".msg");
+  if (wrap) {
+    // Fresh timestamp above the label, since none was rendered while
+    // streaming. Skip if one already exists (e.g. a re-rendered chat).
+    if (!wrap.querySelector(".msg-ts")) {
+      const tsEl = document.createElement("div");
+      tsEl.className = "msg-ts";
+      tsEl.textContent = fmtTs(assistantTs);
+      const label = wrap.querySelector(".msg-label");
+      if (label) label.before(tsEl); else wrap.prepend(tsEl);
+    }
+    if (!wrap.querySelector(".msg-actions")) appendMsgActions(wrap, "assistant");
+  }
+
   scrollBottom();
 
   if (stats && stats.tokens_per_sec != null) {
@@ -519,7 +772,18 @@ function finishStream(bodyEl, content, stats) {
     updateCtxStat();
   }
 
-  state.messages.push({role: "assistant", content});
+  // runStream pre-pushed a placeholder assistant turn — finalize it
+  // in place with the real content + timestamp rather than pushing a
+  // second entry.
+  const last = state.messages[state.messages.length - 1];
+  if (last && last.role === "assistant") {
+    last.content = content;
+    last.ts = assistantTs;
+  } else {
+    state.messages.push({role: "assistant", content, ts: assistantTs});
+  }
+
+  if (wrap) refreshMsgActions();
   persistChat(content);
 }
 
@@ -540,7 +804,8 @@ function updateCtxStat() {
   const pct = Math.min(100, Math.round((used / total) * 100));
   els.statCtx.textContent = `${fmtK(used)} / ${fmtK(total)} (${pct}%)`;
   els.statCtxBar.style.width = pct + "%";
-  els.statCtxBar.className = "stat-bar" + (pct > 85 ? " bar-warn" : pct > 95 ? " bar-danger" : "");
+  els.statCtxBar.className = "stat-bar" +
+    (pct > 95 ? " bar-danger" : pct > 85 ? " bar-warn" : "");
   els.statCtxBarWrap.classList.remove("hidden");
 }
 
@@ -614,69 +879,6 @@ async function persistChat(lastReply = "") {
   };
   await API.chatSave(state.chatId, chat);
   await refreshChatList();
-}
-
-// ── Export chat ───────────────────────────────────────────────────────────────
-function toggleExportMenu() {
-  els.exportMenu.classList.toggle("hidden");
-}
-
-function closeExportMenu() {
-  els.exportMenu.classList.add("hidden");
-}
-
-function exportChat(fmt) {
-  if (!state.messages.length) {
-    showStatus("Nothing to export yet", "err");
-    closeExportMenu();
-    return;
-  }
-
-  const title = els.chatTitle.textContent || "chat";
-  const safeName = title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || "chat";
-  let content, mime, ext;
-
-  if (fmt === "json") {
-    content = JSON.stringify({
-      id: state.chatId, title, model: state.model,
-      exported: new Date().toISOString(), messages: state.messages,
-    }, null, 2);
-    mime = "application/json";
-    ext  = "json";
-
-  } else if (fmt === "txt") {
-    content = state.messages.map(m => {
-      const who = m.role === "user" ? "You" : (state.model ? state.model.split(":")[0] : "Assistant");
-      return `${who}:\n${stripThink(m.content)}`;
-    }).join("\n\n" + "─".repeat(40) + "\n\n");
-    mime = "text/plain";
-    ext  = "txt";
-
-  } else { // markdown
-    const lines = [`# ${title}`, ""];
-    state.messages.forEach(m => {
-      const who = m.role === "user" ? "You" : (state.model ? state.model.split(":")[0] : "Assistant");
-      lines.push(`### ${who}`, "", stripThink(m.content), "");
-    });
-    content = lines.join("\n");
-    mime = "text/markdown";
-    ext  = "md";
-  }
-
-  const blob = new Blob([content], {type: mime + ";charset=utf-8"});
-  const url  = URL.createObjectURL(blob);
-  const a    = document.createElement("a");
-  a.href = url;
-  a.download = `${safeName}.${ext}`;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
-  closeExportMenu();
-}
-
-function stripThink(text) {
-  return text.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
 }
 
 // ── Context files ─────────────────────────────────────────────────────────────
@@ -758,45 +960,87 @@ function startStatsPoller() {
 
 async function updateStats() {
   const model = els.modelSelect.value;
+
+  // No model selected yet — show an idle state, not stale numbers.
+  if (!model) {
+    els.statDevice.textContent     = "⬡ no model";
+    els.statDevice.className       = "stat-device-label";
+    els.statModelInfo.textContent  = "—";
+    els.statVram.textContent       = "—";
+    els.statVramKey.textContent    = "Memory";
+    els.statVramBarWrap.classList.add("hidden");
+    updateCtxStat();
+    return;
+  }
+
   try {
     const s = await API.ps(model);
 
-    // Device badge
-    if (s.device) {
-      els.statDevice.textContent = `⬡ ${s.device}`;
-      els.statDevice.className = "stat-device-label " + (s.device === "GPU" ? "device-gpu" : "device-cpu");
+    // ── Device / accelerator badge ────────────────────────────────
+    // accelerator is one of: Metal (Apple Silicon), GPU (discrete/CUDA),
+    // or CPU (no offload). Color accordingly so the row is meaningful
+    // on and off Apple Silicon.
+    const accel = s.accelerator || s.device || "";
+    if (accel) {
+      els.statDevice.textContent = `⬡ ${accel}`;
+      let cls = "stat-device-label";
+      if (accel === "Metal" || accel === "GPU") cls += " device-gpu";
+      else if (accel === "CPU")                  cls += " device-cpu";
+      els.statDevice.className = cls;
     } else {
       els.statDevice.textContent = "⬡ Ollama";
       els.statDevice.className = "stat-device-label";
     }
 
-    // Model info row: "7B · Q4_K_M"
+    // ── Model info row: "7B · Q4_K_M" (or model name if details missing) ──
     const parts = [];
     if (s.parameter_size) parts.push(s.parameter_size);
     if (s.quantization)   parts.push(s.quantization);
-    els.statModelInfo.textContent = parts.length ? parts.join(" · ") : (model ? model.split(":")[0] : "—");
+    els.statModelInfo.textContent = parts.length
+      ? parts.join(" · ")
+      : (model ? model.split(":")[0] : "—");
 
-    // VRAM bar
-    if (s.vram_used_mb && s.vram_total_mb) {
-      const pct = Math.min(100, Math.round((s.vram_used_mb / s.vram_total_mb) * 100));
-      els.statVram.textContent = `${fmtMB(s.vram_used_mb)} / ${fmtMB(s.vram_total_mb)} (${pct}%)`;
+    // ── Memory row ─────────────────────────────────────────────────
+    // Label adapts to the machine: "VRAM" for discrete GPUs, "Memory"
+    // for Apple Silicon unified memory, or when running on CPU.
+    const unified = s.memory_kind === "unified" || accel === "Metal" || accel === "CPU";
+    els.statVramKey.textContent = unified ? "Memory" : "VRAM";
+
+    const used  = s.vram_used_mb  || 0;
+    const total = s.vram_total_mb || 0;
+
+    if (used && total) {
+      const pct = Math.min(100, Math.round((used / total) * 100));
+      els.statVram.textContent = `${fmtMB(used)} / ${fmtMB(total)} (${pct}%)`;
       els.statVramBar.style.width = pct + "%";
-      els.statVramBar.className = "stat-bar" + (pct > 85 ? " bar-warn" : pct > 95 ? " bar-danger" : "");
+      // Order matters: check the higher threshold first.
+      els.statVramBar.className = "stat-bar" +
+        (pct > 95 ? " bar-danger" : pct > 85 ? " bar-warn" : "");
       els.statVramBarWrap.classList.remove("hidden");
-    } else if (s.vram_used_mb) {
-      els.statVram.textContent = `${fmtMB(s.vram_used_mb)} used`;
+    } else if (used) {
+      els.statVram.textContent = `${fmtMB(used)} used`;
+      els.statVramBarWrap.classList.add("hidden");
+    } else if (accel === "CPU") {
+      els.statVram.textContent = "CPU only";
+      els.statVramBarWrap.classList.add("hidden");
+    } else if (s.model_loaded === false) {
+      // Model isn't resident yet (e.g. just selected, never chatted).
+      els.statVram.textContent = "idle";
       els.statVramBarWrap.classList.add("hidden");
     } else {
-      els.statVram.textContent = s.device === "CPU" ? "CPU only" : "—";
+      els.statVram.textContent = "—";
       els.statVramBarWrap.classList.add("hidden");
     }
 
-    // Store model context length for ctx% display
+    // Store model context length for the ctx% display.
     if (s.context_length) state.modelCtxLen = s.context_length;
     updateCtxStat();
   } catch(_) {
-    els.statDevice.textContent = "⬡ offline";
-    els.statDevice.className = "stat-device-label";
+    els.statDevice.textContent    = "⬡ offline";
+    els.statDevice.className      = "stat-device-label";
+    els.statVramKey.textContent   = "Memory";
+    els.statVram.textContent      = "—";
+    els.statVramBarWrap.classList.add("hidden");
   }
 }
 
@@ -816,6 +1060,69 @@ function escHtml(s) {
 function resizeTextarea() {
   els.userInput.style.height = "auto";
   els.userInput.style.height = Math.min(els.userInput.scrollHeight, 180) + "px";
+}
+
+// ── Draft persistence ─────────────────────────────────────────────────────────
+// Stash unsent textarea text per-chat so switching chats (or reloading)
+// doesn't lose what the user was typing. Lives in localStorage; cleared
+// on send. Keyed by chat id.
+function draftKey() { return `sullybase:draft:${state.chatId || "default"}`; }
+function saveDraft() {
+  const v = els.userInput.value;
+  try {
+    if (v) localStorage.setItem(draftKey(), v);
+    else   localStorage.removeItem(draftKey());
+  } catch(_) {}
+}
+function loadDraft() {
+  try {
+    els.userInput.value = localStorage.getItem(draftKey()) || "";
+  } catch(_) { els.userInput.value = ""; }
+  resizeTextarea();
+  if (!state.streaming) els.btnSend.disabled = !els.userInput.value.trim();
+}
+function clearDraft() {
+  try { localStorage.removeItem(draftKey()); } catch(_) {}
+}
+
+// ── Scroll-to-bottom button ───────────────────────────────────────────────────
+// Show a floating ↓ when the user has scrolled up from the newest
+// message; hide it while streaming (auto-scroll is already active).
+function onMessagesScroll() {
+  if (state.streaming) { els.btnScrollBottom.classList.remove("show"); return; }
+  const wrap = els.messagesWrap;
+  const distFromBottom = wrap.scrollHeight - wrap.scrollTop - wrap.clientHeight;
+  els.btnScrollBottom.classList.toggle("show", distFromBottom > 150);
+}
+
+// ── Keyboard shortcuts ────────────────────────────────────────────────────────
+// Cmd/Ctrl+N → new chat, Cmd/Ctrl+K → focus search, Esc → close panels/dialogs.
+// Suppressed while typing in a text field for N/K; Esc always works.
+function onGlobalKeydown(e) {
+  const mod = e.metaKey || e.ctrlKey;
+  const typing = /^(input|textarea)$/i.test(e.target.tagName) || e.target.isContentEditable;
+
+  if (e.key === "Escape") {
+    if (els.deleteDialog.open) { els.deleteDialog.close(); e.preventDefault(); return; }
+    if (!els.contextPanel.classList.contains("hidden")) {
+      els.contextPanel.classList.add("hidden");
+      els.btnContext.classList.remove("active");
+      e.preventDefault();
+      return;
+    }
+  }
+
+  if (mod && (e.key === "n" || e.key === "N") && !typing) {
+    e.preventDefault();
+    newChat();
+    return;
+  }
+  if (mod && (e.key === "k" || e.key === "K")) {
+    e.preventDefault();
+    els.chatSearchInput.focus();
+    els.chatSearchInput.select();
+    return;
+  }
 }
 
 function saveSettings() {
@@ -863,7 +1170,15 @@ function attachEventListeners() {
   els.userInput.addEventListener("input", () => {
     if (!state.streaming) els.btnSend.disabled = !els.userInput.value.trim();
     resizeTextarea();
+    saveDraft();
   });
+
+  // Scroll-to-bottom button + live show/hide on scroll.
+  els.btnScrollBottom.addEventListener("click", () => scrollBottom(true));
+  els.messagesWrap.addEventListener("scroll", onMessagesScroll);
+
+  // Global keyboard shortcuts.
+  document.addEventListener("keydown", onGlobalKeydown);
 
   els.modelSelect.addEventListener("change", () => {
     state.model    = els.modelSelect.value;
@@ -881,15 +1196,6 @@ function attachEventListeners() {
   els.btnClear.addEventListener("click", clearContext);
   els.btnContext.addEventListener("click", toggleContextPanel);
   els.btnBrowse.addEventListener("click", openFileBrowser);
-
-  els.btnExport.addEventListener("click", e => { e.stopPropagation(); toggleExportMenu(); });
-  els.exportMenu.querySelectorAll("button").forEach(btn => {
-    btn.addEventListener("click", () => exportChat(btn.dataset.fmt));
-  });
-  document.addEventListener("click", e => {
-    if (!els.exportMenu.classList.contains("hidden") &&
-        !e.target.closest("#export-wrap")) closeExportMenu();
-  });
 
   els.btnRefreshModels.addEventListener("click", async () => {
     els.btnRefreshModels.classList.add("spinning");

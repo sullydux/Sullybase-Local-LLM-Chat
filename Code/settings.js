@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════════════════════
-   Sullybase Local LLM Chat v2.3.0 — settings.js
+   Sullybase Local LLM Chat v2.4.0 — settings.js
    ═══════════════════════════════════════════════════════════════ */
 
 const API = {
@@ -48,6 +48,11 @@ async function loadSettings() {
       model:                s.model || "",
       custom_instructions:  s.custom_instructions || "",
     };
+    // Update version from API
+    if (s.version) {
+      const verEl = $("about-version");
+      if (verEl) verEl.textContent = "v" + s.version;
+    }
   } catch (_) {
     loaded = { ...DEFAULTS };
     setFooterMsg("Could not load settings — showing defaults.", "err");

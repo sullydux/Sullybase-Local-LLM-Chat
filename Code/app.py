@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Sullybase Local LLM Chat  v2.3.0
+Sullybase Local LLM Chat  v2.4.0
 Desktop launcher — starts Flask then opens a pywebview window.
 """
 
@@ -14,7 +14,6 @@ import logging.handlers
 from pathlib import Path
 
 APP_NAME    = "Sullybase Local LLM Chat"
-APP_VERSION = "2.3.0"
 APP_BUNDLE  = "Sullybase-LLM-Chat"
 FLASK_HOST  = "127.0.0.1"
 FLASK_PORT  = 5050
@@ -85,7 +84,7 @@ _check_dep("flask",    "flask")
 _check_dep("webview",  "pywebview")
 
 import webview  # noqa: E402
-from server import create_app  # noqa: E402
+from server import create_app, APP_VERSION  # noqa: E402
 
 ICON_PATH = Path(__file__).parent / "Icon.png"
 

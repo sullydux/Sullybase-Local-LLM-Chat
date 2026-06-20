@@ -16,7 +16,7 @@
       <span class="logo-mark">◈</span>
       <div class="logo-text-group">
         <span class="logo-title">Sullybase Local LLM Chat</span>
-        <span class="logo-version">v2.3.0</span>
+        <span class="logo-version" id="logo-version">v…</span>
       </div>
     </div>
     <button id="btn-new-chat" title="New chat">+</button>
@@ -56,7 +56,7 @@
         <span id="stat-model-info" class="stat-val">—</span>
       </div>
       <div class="stats-row">
-        <span class="stat-key">VRAM</span>
+        <span class="stat-key" id="stat-vram-key">VRAM</span>
         <span id="stat-vram" class="stat-val">—</span>
       </div>
       <div id="stat-vram-bar-wrap" class="stat-bar-wrap hidden">
@@ -102,21 +102,6 @@
         Browse
       </button>
       <button id="btn-clear" title="Clear attached context files">Clear</button>
-      <div id="export-wrap">
-        <button id="btn-export" title="Export this chat">
-          <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-            <path d="M8 1.5V10.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-            <path d="M4.5 7L8 10.5L11.5 7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-            <path d="M2.5 13H13.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-          </svg>
-          Export
-        </button>
-        <div id="export-menu" class="hidden">
-          <button data-fmt="md">Markdown (.md)</button>
-          <button data-fmt="json">JSON (.json)</button>
-          <button data-fmt="txt">Plain text (.txt)</button>
-        </div>
-      </div>
     </div>
   </header>
 
@@ -139,9 +124,14 @@
       <div id="empty-state">
         <div class="empty-icon">◈</div>
         <div class="empty-title">Sullybase Local LLM Chat</div>
-        <div class="empty-sub">Local AI chat — powered by Ollama · v2.3.0</div>
+        <div class="empty-sub">Local AI chat — powered by Ollama · <span id="empty-version">v…</span></div>
       </div>
     </div>
+    <button id="btn-scroll-bottom" class="hidden" title="Scroll to bottom">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+        <path d="M8 3V13M8 13L3.5 8.5M8 13L12.5 8.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </button>
   </div>
 
   <!-- Input area -->
