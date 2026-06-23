@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════════════════════
-   Sullybase Local LLM Chat v2.4.0 — app.js
+   Sullybase Local LLM Chat v2.4.1 — app.js
    ═══════════════════════════════════════════════════════════════ */
 
 // ── API helpers ───────────────────────────────────────────────────────────────
@@ -320,7 +320,28 @@ function showEmpty(show) {
     es.innerHTML = `
       <div class="empty-icon">◈</div>
       <div class="empty-title">Sullybase Local LLM Chat</div>
-      <div class="empty-sub">Local AI chat — powered by Ollama · <span id="empty-version">${vStr}</span></div>`;
+      <div class="empty-sub">Local AI chat — powered by Ollama · <span id="empty-version">${vStr}</span></div>
+      <div class="starter-prompts">
+        <button class="starter-prompt" data-prompt="Explain quantum computing.">
+          <span>Explain quantum computing.</span>
+        </button>
+        <button class="starter-prompt" data-prompt="Code a python task manager.">
+          <span>Code a python task manager.</span>
+        </button>
+        <button class="starter-prompt" data-prompt="What is the best engine to make a game?">
+          <span>What is the best engine to make a game?</span>
+        </button>
+      </div>`;
+    es.addEventListener("click", async e => {
+      const btn = e.target.closest(".starter-prompt");
+      if (btn && !btn.disabled) {
+        es.querySelectorAll(".starter-prompt").forEach(b => b.disabled = false);
+        btn.disabled = true;
+        els.userInput.value = btn.dataset.prompt;
+        resizeTextarea();
+        await sendMessage();
+      }
+    });
     els.messages.prepend(es);
   }
   es.style.display = show ? "flex" : "none";

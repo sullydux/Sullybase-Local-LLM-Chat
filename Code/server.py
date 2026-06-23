@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-server.py — Flask backend for Sullybase Local LLM Chat v2.4.0
+server.py — Flask backend for Sullybase Local LLM Chat v2.4.1
 """
 
 import gc
@@ -34,9 +34,9 @@ def _load_version() -> str:
     blank so the app still boots in unusual packaging situations."""
     try:
         v = (Path(__file__).parent / "version.txt").read_text(encoding="utf-8").strip()
-        return v or "2.4.0"
+        return v or "2.4.1"
     except Exception:
-        return "2.4.0"
+        return "2.4.1"
 
 
 APP_VERSION = _load_version()

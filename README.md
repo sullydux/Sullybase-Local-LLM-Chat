@@ -6,7 +6,7 @@
 
 # [Sullybase Local LLM Chat](https://sullydux.github.io/Sullybase-Local-LLM-Chat/)
 
-v2.4.0
+v2.4.1
 </div>
 
 A lightweight desktop app for chatting with local LLMs via **Ollama**. All conversations stay on your device — no external data transmission.

@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════════════════════
-   Sullybase Local LLM Chat v2.4.0 — style.css
+   Sullybase Local LLM Chat v2.4.1 — style.css
    Dark mode · green accent
    ═══════════════════════════════════════════════════════════════ */
 
@@ -559,6 +559,49 @@ option { background: var(--bg3); }
 .empty-icon { font-size: 38px; color: var(--green); opacity: .4; margin-bottom: 6px; }
 .empty-title { font-size: 20px; font-weight: 700; color: var(--text2); letter-spacing: -.4px; }
 .empty-sub { font-size: 12.5px; color: var(--text3); }
+
+.starter-prompts {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 14px;
+  width: 100%;
+  max-width: 320px;
+}
+
+.starter-prompt {
+  padding: 10px 14px;
+  border-radius: 7px;
+  border: 1px solid var(--border);
+  background: var(--bg3);
+  color: var(--text2);
+  font-size: 12.5px;
+  text-align: left;
+  transition: all .15s;
+  cursor: pointer;
+}
+
+.starter-prompt span {
+  display: block;
+  line-height: 1.4;
+}
+
+.starter-prompt:hover {
+  border-color: var(--green-dim);
+  color: var(--text);
+  background: var(--bg4);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(74,222,128,.15);
+}
+
+.starter-prompt:active {
+  transform: translateY(0);
+}
+
+.starter-prompt:disabled {
+  opacity: .4;
+  cursor: not-allowed;
+}
 
 /* ── Message bubbles ────────────────────────────────────────── */
 .msg { display: flex; flex-direction: column; gap: 3px; padding: 4px 0; }
