@@ -65,7 +65,7 @@ Shows prompt tokens ↑, completion tokens ↓, tokens/sec, first-token latency,
 
 ## Setup
 
-1. **Download** the `Code` folder from this repository
+1. **Download** the [Code](https://github.com/sullydux/Sullybase-Local-LLM-Chat/releases/latest) folder from this repository
 2. **Install dependencies**:
    ```bash
    pip install -r requirements.txt
