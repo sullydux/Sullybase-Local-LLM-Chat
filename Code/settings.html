@@ -1,109 +1,165 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Settings — Sullybase Local LLM Chat</title>
-<link rel="stylesheet" href="style.css">
-<link rel="stylesheet" href="settings.css">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sullybase Local LLM Chat — Settings</title>
+  <link rel="stylesheet" href="settings.css">
 </head>
 <body class="settings-body">
 
-<main id="settings-main">
-  <header id="settings-topbar">
-    <a id="btn-back" href="index.html" title="Back to chat">
-      <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-        <path d="M9.5 3L4.5 8L9.5 13" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
-      </svg>
-      Back to chat
-    </a>
-    <div id="settings-title-group">
-      <span class="logo-mark">◈</span>
-      <span id="settings-title">Settings</span>
-    </div>
-    <span id="settings-save-indicator" class="hidden">Saved</span>
-  </header>
+  <div id="settings-wrapper">
+    <div id="settings-main">
+      <header id="settings-topbar">
+        <div id="settings-top-l">
+          <button id="btn-close" class="icon-button" title="Close settings (⌘W)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M19 12H5M12 19l-7-7 7-7"/>
+            </svg>
+          </button>
+        </div>
+        <div id="settings-title-group">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
+            <path d="M12 2a1 1 0 0 1 1 1v2a1 1 0 1 1-2 0V3a1 1 0 0 1 1-1zm0 16a1 1 0 0 1 1 1v2a1 1 0 1 1-2 0v-2a1 1 0 0 1 1-1zM4.22 4.22a1 1 0 0 1 1.41 0l1.41 1.41a1 1 0 1 1-1.41 1.41L4.22 5.63a1 1 0 0 1 0-1.41zm12.72 12.72a1 1 0 0 1 1.41 0l1.41 1.41a1 1 0 0 1-1.41 1.41l-1.41-1.41a1 1 0 0 1 0-1.41zM2 12a1 1 0 0 1 1-1h2a1 1 0 1 1 0 2H3a1 1 0 0 1-1-1zm16 0a1 1 0 0 1 1-1h2a1 1 0 1 1 0 2h-2a1 1 0 0 1-1-1zM5.64 5.64a1 1 0 0 1 1.41 1.41L5.63 8.47a1 1 0 0 1-1.41-1.41l1.42-1.42zm12.72 12.72a1 1 0 0 1 1.41 1.41l-1.41 1.41a1 1 0 0 1-1.41-1.41l1.41-1.41zM19 12a1 1 0 0 1 1 1v.01a1 1 0 1 1-2 0V13a1 1 0 0 1 1-1z"/>
+          </svg>
+          <span id="settings-title">Settings</span>
+        </div>
+        <span id="settings-save-indicator" class="hidden">Saved</span>
+      </header>
 
-  <div id="settings-scroll">
-    <div id="settings-content">
+      <div id="settings-scroll">
+        <div id="settings-content">
 
-      <!-- ── Connection ───────────────────────────────────────── -->
-      <section class="settings-section">
-        <div class="settings-section-head">
-          <h2>Connection</h2>
-          <p>Where Ollama is running.</p>
-        </div>
+          <!-- ── Backend ───────────────────────────────────────────────── -->
+          <section class="settings-section">
+            <div class="settings-section-head">
+              <h2>Backend</h2>
+              <p>Choose your local LLM inference backend. Each backend has its own default model and URL — switch freely, your settings persist per provider.</p>
+            </div>
 
-        <div class="field-row">
-          <label for="inp-ollama-url">Ollama URL</label>
-          <input id="inp-ollama-url" type="text" class="mono-input" placeholder="http://localhost:11434" spellcheck="false" autocomplete="off">
-        </div>
-        <div id="ollama-status" class="field-status"></div>
+            <div class="field-row">
+              <label for="inp-backend">Active backend</label>
+              <select id="inp-backend" class="settings-select">
+                <option value="ollama">Ollama (local models)</option>
+                <option value="mlx">MLX LM Server (Apple Silicon)</option>
+              </select>
+            </div>
 
-        <div class="field-row">
-          <label for="inp-default-model">Default model</label>
-          <input id="inp-default-model" type="text" class="mono-input" placeholder="e.g. llama3.1:8b" spellcheck="false" autocomplete="off">
-        </div>
-        <p class="field-hint">Used when a chat first loads. Leave blank to keep whichever model was last selected.</p>
-      </section>
+            <!-- Ollama Section -->
+            <div id="ollama-section">
+              <div class="field-row">
+                <label for="inp-ollama-url">Ollama URL</label>
+                <input id="inp-ollama-url" type="text" class="mono-input" placeholder="http://localhost:11434" spellcheck="false" autocomplete="off">
+                <div class="field-hint" id="ollama-url-debug"></div>
+              </div>
+              <div id="ollama-status" class="field-status"></div>
+              <p class="field-hint"><strong>To use Ollama:</strong> Install from <code>ollama.com</code>, then run in a terminal: <code>open /Applications/Ollama.app</code> or <code>ollama serve</code></p>
 
-      <!-- ── System instructions ─────────────────────────────────── -->
-      <section class="settings-section">
-        <div class="settings-section-head">
-          <h2>System instructions</h2>
-          <p>Sent with every message, before your conversation.</p>
-        </div>
+              <div class="field-row">
+                <label for="inp-model-ollama">Default model (Ollama)</label>
+                <input id="inp-model-ollama" type="text" class="mono-input" placeholder="e.g. llama3.2" spellcheck="false" autocomplete="off">
+              </div>
+              <p class="field-hint">Used as the initial selection when no prior model was chosen. Pull with <code>ollama pull &lt;model&gt;</code>.</p>
+            </div>
 
-        <div class="field-row">
-          <label>Base instructions</label>
-          <div id="base-prompt-box" class="readonly-box">Full Markdown rendering is auto applied. Use minimal emojis. Be clear and consise.</div>
-        </div>
-        <p class="field-hint">Always included. Not editable here.</p>
+            <!-- MLX Section -->
+            <div id="mlx-section" style="display:none;">
+              <div class="field-row">
+                <label for="inp-mlx-url">MLX Server URL</label>
+                <input id="inp-mlx-url" type="text" class="mono-input" placeholder="http://localhost:8080" spellcheck="false" autocomplete="off">
+                <div class="field-hint" id="mlx-url-debug"></div>
+              </div>
+              <div id="mlx-status" class="field-status"></div>
+              <p class="field-hint"><strong>To use MLX:</strong> Install MLX LM, then start the server with one of these copyable commands.</p>
 
-        <div class="field-row">
-          <label for="inp-custom-instructions">Custom instructions</label>
-          <textarea id="inp-custom-instructions" rows="7" placeholder="e.g. I mainly write Python and TypeScript. Prefer pytest over unittest. Keep explanations short unless I ask for depth. Default to Tailwind for any frontend snippets."></textarea>
-        </div>
-        <p class="field-hint">Add anything you want the model to know every time — preferred languages or frameworks, tone, conventions, things to avoid. This is appended after the base instructions above.</p>
+              <div class="command-row">
+                <div class="command-label">Install MLX LM</div>
+                <div class="command-box">
+                  <code id="mlx-install-cmd" class="command-code">pip install mlx-lm</code>
+                  <button type="button" class="command-copy-btn" data-copy-target="mlx-install-cmd">Copy</button>
+                </div>
+              </div>
 
-        <div class="char-count-row">
-          <span id="char-count">0 characters</span>
-        </div>
-      </section>
+              <div class="command-row">
+                <div class="command-label">Start MLX server</div>
+                <div class="command-box">
+                  <code id="mlx-start-cmd" class="command-code">python -m mlx_lm.server --model mlx-community/Llama-3.2-3B-Instruct-4bit</code>
+                  <button type="button" class="command-copy-btn" data-copy-target="mlx-start-cmd">Copy</button>
+                </div>
+              </div>
 
-      <!-- ── About ─────────────────────────────────────────────── -->
-      <section class="settings-section">
-        <div class="settings-section-head">
-          <h2>About</h2>
-        </div>
-        <div class="about-row">
-          <span class="stat-key">App</span>
-          <span class="stat-val">Sullybase Local LLM Chat</span>
-        </div>
-        <div class="about-row">
-            <span class="stat-key">Version</span>
-            <span class="stat-val" id="about-version">v…</span>
-        </div>
-        <div class="about-row">
-          <span class="stat-key">GitHub</span>
-          <span class="stat-val">
-            <a href="https://github.com/sullydux/Sullybase-Local-LLM-Chat" target="_blank" rel="noopener noreferrer">Sullybase-Local-LLM-Chat</a>
-          </span>
-        </div>
-      </section>
+              <p class="field-hint">Replace <code>mlx-community/Llama-3.2-3B-Instruct-4bit</code> with your chosen model id.</p>
 
+              <div class="field-row">
+                <label for="inp-model-mlx">Default model (MLX)</label>
+                <input id="inp-model-mlx" type="text" class="mono-input" placeholder="e.g. mlx-community/Llama-3.2-3B-Instruct-4bit" spellcheck="false" autocomplete="off">
+              </div>
+              <p class="field-hint">Must match the <code>--model</code> id you passed to <code>mlx_lm.server</code>.</p>
+            </div>
+          </section>
+
+          <!-- ── System instructions ─────────────────────────────────── -->
+          <section class="settings-section">
+            <div class="settings-section-head">
+              <h2>System instructions</h2>
+              <p>Sent with every message, before your conversation.</p>
+            </div>
+
+            <div class="field-row">
+              <label>Base instructions</label>
+              <div id="base-prompt-box" class="readonly-box">Full Markdown rendering is auto applied. Use minimal emojis. Be clear and concise.</div>
+            </div>
+            <p class="field-hint">Always included. Not editable here.</p>
+
+            <div class="field-row">
+              <label for="inp-custom-instructions">Custom instructions</label>
+              <textarea id="inp-custom-instructions" placeholder="e.g. I mainly write Python and TypeScript. Prefer pytest over unittest. Keep explanations short unless I ask for depth. Default to Tailwind for any frontend snippets."></textarea>
+            </div>
+            <p class="field-hint">Add anything you want the model to know every time — preferred languages or frameworks, tone, conventions, things to avoid.</p>
+
+            <div class="char-count-row">
+              <span id="char-count">0 characters</span>
+            </div>
+          </section>
+
+          <!-- ── About ─────────────────────────────────────────────── -->
+          <section class="settings-section">
+            <div class="settings-section-head">
+              <h2>About</h2>
+            </div>
+            <div class="about-row">
+              <span class="stat-key">App</span>
+              <span class="stat-val">Sullybase Local LLM Chat</span>
+            </div>
+            <div class="about-row">
+              <span class="stat-key">Version</span>
+              <span class="stat-val" id="about-version">v…</span>
+            </div>
+            <div class="about-row">
+              <span class="stat-key">Backends</span>
+              <span class="stat-val">Ollama · MLX LM Server</span>
+            </div>
+            <div class="about-row">
+              <span class="stat-key">GitHub</span>
+              <span class="stat-val">
+                <a href="https://github.com/sullydux/Sullybase-Local-LLM-Chat" target="_blank" rel="noopener noreferrer">Source code</a>
+              </span>
+            </div>
+          </section>
+
+        </div>
+      </div>
+
+      <footer id="settings-footer">
+        <span id="settings-footer-msg"></span>
+        <div id="settings-footer-btns">
+          <button id="btn-reset" class="btn-secondary">Reset</button>
+          <button id="btn-save" class="btn-primary">Save</button>
+        </div>
+      </footer>
     </div>
   </div>
 
-  <footer id="settings-footer">
-    <span id="settings-footer-msg"></span>
-    <div id="settings-footer-btns">
-      <button id="btn-reset" class="btn-secondary">Reset to defaults</button>
-      <button id="btn-save" class="btn-primary">Save changes</button>
-    </div>
-  </footer>
-</main>
-
-<script src="settings.js"></script>
+  <script src="settings.js"></script>
 </body>
 </html>

@@ -1,25 +1,34 @@
 /* ═══════════════════════════════════════════════════════════════
-   Sullybase Local LLM Chat v2.4.1 — app.js
+   Sullybase Local LLM Chat v2.5.1 — app.js
+   - Provider-aware (Ollama + MLX)
+   - Persistent chat saving (atomic server-side writes)
+   - Dynamic errors based on active backend
+   - Separate default model per provider
    ═══════════════════════════════════════════════════════════════ */
 
 // ── API helpers ───────────────────────────────────────────────────────────────
 const API = {
-  models:      ()      => fetch("/api/models").then(r => r.json()),
-  ps:          (model) => fetch(`/api/ps?model=${encodeURIComponent(model)}`).then(r => r.json()),
-  title:       (model, text, reply) => fetch("/api/title", _json({model, text, reply})).then(r => r.json()),
-  chats:       ()      => fetch("/api/chats").then(r => r.json()),
-  search:      (q)     => fetch(`/api/search?q=${encodeURIComponent(q)}`).then(r => r.json()),
-  chatGet:     (id)    => fetch(`/api/chats/${id}`).then(r => r.json()),
-  chatSave:    (id, b) => fetch(`/api/chats/${id}`, _json(b)),
-  chatDel:     (id)    => fetch(`/api/chats/${id}`, {method:"DELETE"}),
-  settings:    ()      => fetch("/api/settings").then(r => r.json()),
-  settingsSave:(d)     => fetch("/api/settings", _json(d)),
-  context:     (path)  => fetch("/api/context", _json({path})).then(r => r.json()),
-  browse:      (mode)  => fetch("/api/browse",  _json({mode})).then(r => r.json()),
+  ping:       ()      => fetch("/api/ping").then(r => r.json()),
+  version:    ()      => fetch("/api/version").then(r => r.json()),
+  models:     ()      => fetch("/api/models").then(r => r.json()),
+  ps:         (model) => fetch(`/api/ps?model=${encodeURIComponent(model)}`).then(r => r.json()),
+  title:      (model, text, reply) => fetch("/api/title", _json({model, text, reply})).then(r => r.json()),
+  chats:      ()      => fetch("/api/chats").then(r => r.json()),
+  search:     (q)     => fetch(`/api/search?q=${encodeURIComponent(q)}`).then(r => r.json()),
+  chatGet:    (id)    => fetch(`/api/chat/${id}`).then(r => r.json()),
+  chatSave:   (id, b) => fetch(`/api/chat/${id}`, _json(b)),
+  chatDel:    (id)    => fetch(`/api/chat/${id}`, {method: "DELETE"}),
+  settings:   ()      => fetch("/api/settings").then(r => r.json()),
+  settingsSave:(d)    => fetch("/api/settings", _json(d)),
+  settingsKey:(k, v)  => fetch(`/api/settings/${k}`, _json({value: v})),
+  context:    (path)  => fetch("/api/context", _json({path})).then(r => r.json()),
+  browse:     (mode)  => fetch("/api/browse",  _json({mode})).then(r => r.json()),
 };
 
-function _json(body, method="POST") {
-  return {method, headers:{"Content-Type":"application/json"}, body: JSON.stringify(body)};
+const MLX_START_COMMAND = "python -m mlx_lm.server --model <model>";
+
+function _json(body, method = "POST") {
+  return {method, headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)};
 }
 
 // ── State ─────────────────────────────────────────────────────────────────────
@@ -28,15 +37,16 @@ const state = {
   messages:      [],
   contextFiles:  [],
   model:         "",
+  backend:       "ollama",     // active backend: ollama | mlx
   streaming:     false,
   pendingDel:    null,
   firstTokenMs:  0,
   genMs:         0,
   lastTps:       0,
-  lastPromptTok: 0,   // track used context tokens
-  modelCtxLen:   0,   // track model max context
-  titleOk:       false, // whether the AI-generated title succeeded for this chat
-  abortCtrl:     null, // AbortController for the in-flight stream
+  lastPromptTok: 0,
+  modelCtxLen:   0,
+  titleOk:       false,
+  abortCtrl:     null,
   searchQuery:   "",
   appVersion:    "",
 };
@@ -53,15 +63,16 @@ renderer.code = (code, lang) => {
       <span class="code-lang">${escHtml(lang || "code")}</span>
       <button class="btn-copy" data-code="${b64}">Copy</button>
     </div>
-    <pre><code class="hljs language-${lang||''}">${highlighted}</code></pre>
+    <pre><code class="hljs language-${lang || ""}">${highlighted}</code></pre>
   </div>`;
 };
-marked.use({ renderer, breaks: true, gfm: true });
+marked.use({renderer, breaks: true, gfm: true});
 
 // ── DOM ───────────────────────────────────────────────────────────────────────
 const $ = id => document.getElementById(id);
 const els = {
   modelSelect:      $("model-select"),
+  backendBadge:     $("backend-badge"),
   chatList:         $("chat-list"),
   chatSearchInput:  $("chat-search-input"),
   chatSearchClear:  $("chat-search-clear"),
@@ -111,35 +122,55 @@ async function init() {
 async function loadSettings() {
   try {
     const s = await API.settings();
-    if (s.model) state.model = s.model;
-    if (s.current_chat_id) state.chatId = s.current_chat_id;
+    state.backend = s.backend || "ollama";
+    // Use the per-provider default model — fall back to whatever the
+    // backend reports as available.
+    const modelKey = state.backend === "mlx" ? "model_mlx" : "model_ollama";
+    if (s[modelKey]) state.model = s[modelKey];
     if (s.version) {
       state.appVersion = s.version;
       const vStr = "v" + s.version;
-      const logoVer = $("logo-version");
-      if (logoVer) logoVer.textContent = vStr;
+      const logoVer  = $("logo-version");
       const emptyVer = $("empty-version");
+      if (logoVer)  logoVer.textContent  = vStr;
       if (emptyVer) emptyVer.textContent = vStr;
       document.title = "Sullybase Local LLM Chat " + vStr;
     }
-  } catch(_) {}
+    if (s.current_chat_id) state.chatId = s.current_chat_id;
+    updateBackendBadge();
+  } catch (_) {}
 }
 
+function updateBackendBadge() {
+  if (!els.backendBadge) return;
+  const b = state.backend || "ollama";
+  els.backendBadge.textContent = b;
+  els.backendBadge.className = "backend-badge badge-" + b;
+  els.backendBadge.title = `Active backend: ${b}`;
+}
+
+// ── Models ────────────────────────────────────────────────────────────────────
 async function loadModels() {
   try {
     const resp   = await API.models();
-    const models = resp.models || resp;
-    const online = resp.online !== undefined ? resp.online : models.length > 0;
+    const models = resp.models || [];
+    const online = !!resp.online;
+    state.backend = resp.backend || state.backend || "ollama";
+    updateBackendBadge();
 
     els.modelSelect.innerHTML = "";
 
     if (!online || !models.length) {
       const opt = document.createElement("option");
       opt.value = "";
-      opt.textContent = online ? "No models — run: ollama pull …" : "Run Ollama";
+      opt.textContent = online
+        ? `No models — ${state.backend === "mlx"
+            ? `start ${MLX_START_COMMAND}`
+            : "run: ollama pull …"}`
+        : `${state.backend === "mlx" ? "MLX server offline" : "Run Ollama"}`;
       els.modelSelect.appendChild(opt);
       els.statDevice.textContent = "⬡ offline";
-      els.statDevice.className = "stat-device-label";
+      els.statDevice.className   = "stat-device-label";
       return;
     }
 
@@ -150,32 +181,47 @@ async function loadModels() {
       els.modelSelect.appendChild(opt);
     });
 
-    if (!state.model || !models.includes(state.model)) state.model = models[0];
+    if (!state.model || !models.includes(state.model)) {
+      state.model = models[0];
+    }
     els.modelSelect.value = state.model;
-  } catch(_) {
-    els.modelSelect.innerHTML = '<option value="">Run Ollama</option>';
+    persistActiveModel();
+  } catch (_) {
+    els.modelSelect.innerHTML =
+      `<option value="">${state.backend === "mlx"
+        ? "MLX server offline"
+        : "Run Ollama"}</option>`;
     els.statDevice.textContent = "⬡ offline";
-    els.statDevice.className = "stat-device-label";
+    els.statDevice.className   = "stat-device-label";
   }
+}
+
+// Remember the user's chosen model per-provider so switching backends
+// doesn't lose their preference.
+function persistActiveModel() {
+  const key = state.backend === "mlx" ? "model_mlx" : "model_ollama";
+  // Don't wait — fire and forget.
+  API.settingsKey(key, state.model).catch(() => {});
 }
 
 // ── Chat list ─────────────────────────────────────────────────────────────────
 async function loadChatList() {
   try {
-    const chats = await API.chats();
+    const data = await API.chats();
+    const chats = data.chats || data || [];
     renderChatList(chats);
     if (state.chatId && chats.find(c => c.id === state.chatId)) {
       await loadChat(state.chatId);
       return;
     }
-  } catch(_) {}
+  } catch (_) {}
   newChat();
 }
 
 function renderChatList(chats) {
   els.chatList.innerHTML = "";
 
-  if (!chats.length) {
+  if (!chats || !chats.length) {
     const empty = document.createElement("div");
     empty.className = "chat-search-empty";
     empty.textContent = state.searchQuery ? "No matching chats" : "No chats yet";
@@ -230,8 +276,8 @@ function onChatSearchInput() {
   searchDebounce = setTimeout(async () => {
     try {
       const results = await API.search(q);
-      renderChatList(results);
-    } catch(_) {}
+      renderChatList(results.chats || results);
+    } catch (_) {}
   }, 200);
 }
 
@@ -246,34 +292,34 @@ async function refreshChatList() {
   try {
     if (state.searchQuery) {
       const results = await API.search(state.searchQuery);
-      renderChatList(results);
+      renderChatList(results.chats || results);
     } else {
-      const chats = await API.chats();
-      renderChatList(chats);
+      const data = await API.chats();
+      renderChatList(data.chats || data);
       setActiveChatItem(state.chatId);
     }
-  } catch(_) {}
+  } catch (_) {}
 }
 
 async function switchChat(id) {
   await loadChat(id);
-  await loadModels(); // auto-refresh models on chat switch
+  await loadModels();
 }
 
 async function loadChat(id) {
   try {
     const chat = await API.chatGet(id);
-    state.chatId   = chat.id;
-    state.messages = chat.messages || [];
-    state.contextFiles = [];
-    state.titleOk  = !!chat.titleOk;
+    state.chatId        = chat.id || id;
+    state.messages      = chat.messages || [];
+    state.contextFiles  = [];
+    state.titleOk       = !!chat.titleOk;
     els.chatTitle.textContent = chat.title || "New chat";
     renderMessages();
     renderContextFiles();
     setActiveChatItem(id);
     loadDraft();
     saveSettings();
-  } catch(_) { newChat(); }
+  } catch (_) { newChat(); }
 }
 
 function newChat() {
@@ -320,7 +366,7 @@ function showEmpty(show) {
     es.innerHTML = `
       <div class="empty-icon">◈</div>
       <div class="empty-title">Sullybase Local LLM Chat</div>
-      <div class="empty-sub">Local AI chat — powered by Ollama · <span id="empty-version">${vStr}</span></div>
+      <div class="empty-sub">Local AI chat — Ollama or MLX · <span id="empty-version">${vStr}</span></div>
       <div class="starter-prompts">
         <button class="starter-prompt" data-prompt="Explain quantum computing.">
           <span>Explain quantum computing.</span>
@@ -347,19 +393,17 @@ function showEmpty(show) {
   es.style.display = show ? "flex" : "none";
 }
 
-function appendMessage(role, content, stream=false, ts="") {
+function appendMessage(role, content, stream = false, ts = "") {
   showEmpty(false);
 
   const modelName = state.model
-    ? state.model.split(":")[0].replace(/-/g," ")
+    ? state.model.split(":")[0].split("/").pop().replace(/-/g, " ")
     : "Assistant";
 
-  const wrap  = document.createElement("div");
+  const wrap = document.createElement("div");
   wrap.className = `msg ${role}`;
   wrap.dataset.role = role;
 
-  // Assistant messages get a dim timestamp above the label. User
-  // messages don't (per spec) — keeps the user side clean.
   if (role === "assistant" && ts) {
     const tsEl = document.createElement("div");
     tsEl.className = "msg-ts";
@@ -383,17 +427,12 @@ function appendMessage(role, content, stream=false, ts="") {
   }
   wrap.appendChild(body);
 
-  // Hover action row. Only attach for finalized (non-streaming)
-  // messages — the streaming assistant bubble gets its actions once
-  // it completes, in finishStream.
   if (!stream) appendMsgActions(wrap, role);
 
   els.messages.appendChild(wrap);
   return body;
 }
 
-// Format an ISO timestamp as "2:45 PM" when same day as now, else a
-// short date like "Jun 18". Used for the assistant message label.
 function fmtTs(iso) {
   if (!iso) return "";
   const d = new Date(iso);
@@ -409,12 +448,9 @@ function fmtTs(iso) {
     h = h % 12 || 12;
     return `${h}:${m} ${ampm}`;
   }
-  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  return d.toLocaleDateString(undefined, {month: "short", day: "numeric"});
 }
 
-// Build the hover action buttons for a message. Regenerate only
-// applies to the *last* assistant message — the caller is
-// responsible for stripping it from older ones (refreshMsgActions).
 function appendMsgActions(wrap, role) {
   const row = document.createElement("div");
   row.className = "msg-actions";
@@ -440,9 +476,6 @@ function appendMsgActions(wrap, role) {
   wrap.appendChild(row);
 }
 
-// After a render or a new reply, only the final assistant message
-// should show Regenerate. Walk the list and hide/remove the action
-// row on every assistant message except the last one.
 function refreshMsgActions() {
   const assistantMsgs = els.messages.querySelectorAll(".msg.assistant");
   assistantMsgs.forEach((m, i, arr) => {
@@ -454,12 +487,6 @@ function refreshMsgActions() {
 }
 
 function renderAssistantContent(raw) {
-  // Captures both fully-closed <think>…</think> blocks and an unclosed
-  // <think>… running to the end of the stream. Thinking models emit the
-  // opening tag first and stream their reasoning token-by-token before the
-  // closing tag arrives, so the trailing-`$` alternative is what keeps that
-  // live reasoning inside the collapsible block instead of leaking into the
-  // rendered answer.
   let thinkHtml = "";
   let clean     = "";
   let last      = 0;
@@ -469,8 +496,6 @@ function renderAssistantContent(raw) {
     clean    += raw.slice(last, m.index);
     const inner  = m[1].trim();
     const closed = m[2].toLowerCase() === "</think>";
-    // Skip empty closed blocks (e.g. a non-thinking model echoing the tags)
-    // but always render a live one so the streaming cursor has a home.
     if (inner || !closed) thinkHtml += makeThinkBlock(inner, !closed);
     last = m.index + m[0].length;
   }
@@ -478,10 +503,7 @@ function renderAssistantContent(raw) {
   return thinkHtml + marked.parse(clean.trim() || "");
 }
 
-function makeThinkBlock(text, streaming=false) {
-  // While streaming (no closing tag yet) keep the block expanded so the user
-  // can watch the reasoning arrive live; once closed it collapses to a summary
-  // they can re-expand on demand.
+function makeThinkBlock(text, streaming = false) {
   const open  = streaming ? " open" : "";
   const label = streaming ? "Thinking…" : "Thought process";
   return `<div class="think-block${open}">
@@ -498,8 +520,11 @@ function addCopyListeners(container) {
         await navigator.clipboard.writeText(code);
         btn.textContent = "Copied!";
         btn.classList.add("copied");
-        setTimeout(() => { btn.textContent = "Copy"; btn.classList.remove("copied"); }, 1500);
-      } catch(_) {}
+        setTimeout(() => {
+          btn.textContent = "Copy";
+          btn.classList.remove("copied");
+        }, 1500);
+      } catch (_) {}
     });
   });
 }
@@ -509,8 +534,11 @@ document.addEventListener("click", e => {
   if (toggle) toggle.closest(".think-block").classList.toggle("open");
 });
 
-function scrollBottom(smooth=true) {
-  els.messagesWrap.scrollTo({top: els.messagesWrap.scrollHeight, behavior: smooth ? "smooth" : "instant"});
+function scrollBottom(smooth = true) {
+  els.messagesWrap.scrollTo({
+    top: els.messagesWrap.scrollHeight,
+    behavior: smooth ? "smooth" : "instant",
+  });
 }
 
 // ── Send message ──────────────────────────────────────────────────────────────
@@ -524,6 +552,46 @@ function stopGeneration() {
   if (state.abortCtrl) state.abortCtrl.abort();
 }
 
+// Render a provider-aware error inside an assistant bubble.
+function renderStreamError(msg, payload) {
+  const provider = (payload && payload.provider) || state.backend || "ollama";
+  const hint = providerHint(provider, msg);
+  return `<div class="err-box">
+    <div class="err-title">⚠ ${escHtml(provider.toUpperCase())} error</div>
+    <div class="err-text">${escHtml(msg)}</div>
+    ${hint ? `<div class="err-hint">${escHtml(hint)}</div>` : ""}
+  </div>`;
+}
+
+function providerHint(provider, msg) {
+  const m = (msg || "").toLowerCase();
+  if (provider === "ollama") {
+    if (m.includes("cannot reach") || m.includes("refused")) {
+      return "Start Ollama: open the Ollama app, or run `ollama serve` in a terminal.";
+    }
+    if (m.includes("not found")) {
+      return "Pull the model first, e.g. `ollama pull " + (state.model || "llama3.2") + "`.";
+    }
+    if (m.includes("timeout") || m.includes("timed out")) {
+      return "The model may still be loading — wait a few seconds and retry.";
+    }
+    return "Check that the Ollama URL in Settings is correct and reachable.";
+  }
+  if (provider === "mlx") {
+    if (m.includes("cannot reach") || m.includes("refused")) {
+      return "Start MLX: `python -m mlx_lm.server --model <model>`.";
+    }
+    if (m.includes("not found")) {
+      return "The model id sent to MLX doesn't match a model the server has loaded.";
+    }
+    if (m.includes("timeout") || m.includes("timed out")) {
+      return "MLX may still be loading the model into memory — retry in a moment.";
+    }
+    return "Check that the MLX Server URL in Settings is correct and reachable.";
+  }
+  return "";
+}
+
 async function sendMessage() {
   if (state.streaming) { stopGeneration(); return; }
 
@@ -531,7 +599,13 @@ async function sendMessage() {
   if (!text) return;
 
   const model = els.modelSelect.value;
-  if (!model) { showStatus("Select a model — is Ollama running?", "err"); return; }
+  if (!model) {
+    const tip = state.backend === "mlx"
+      ? "Select a model — is the MLX server running?"
+      : "Select a model — is Ollama running?";
+    showStatus(tip, "err");
+    return;
+  }
 
   showEmpty(false);
   const userTs = new Date().toISOString();
@@ -549,16 +623,7 @@ async function sendMessage() {
   await runStream(model, state.messages.slice(0, -1), text, assistantBody);
 }
 
-// Shared streaming core used by sendMessage, regenerateAt and
-// beginEdit's save. Streams from /api/chat into the given assistant
-// body element, updating state.messages and persisting on completion.
-// `history` is the conversation before the final user turn; `userText`
-// is that final user prompt (already pushed to state.messages by the
-// caller when sending new, but for regenerate there is no new user
-// turn — see the override below).
-async function runStream(model, history, userText, assistantBody, opts={}) {
-  // For regenerate: we reuse the existing trailing user turn as the
-  // prompt and stream a fresh assistant reply into a fresh body.
+async function runStream(model, history, userText, assistantBody, opts = {}) {
   const sendingNew = !opts.regenerate;
   if (sendingNew) {
     state.messages.push({role: "assistant", content: ""});
@@ -568,6 +633,8 @@ async function runStream(model, history, userText, assistantBody, opts={}) {
   state.firstTokenMs = 0;
   state.abortCtrl    = new AbortController();
   els.perfInfo.textContent = "⏳ Waiting…";
+  els.statTps.textContent = "";
+  els.statTps.className = "stat-tps-label";
 
   let accumulated = "";
   let lastEvent   = "";
@@ -585,7 +652,19 @@ async function runStream(model, history, userText, assistantBody, opts={}) {
       }),
     });
 
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    if (!resp.ok) {
+      let errText = `HTTP ${resp.status}`;
+      try {
+        const ej = await resp.json();
+        if (ej && (ej.error || ej.message)) errText = ej.error || ej.message;
+      } catch (_) {}
+      assistantBody.innerHTML = renderStreamError(errText, {provider: state.backend});
+      assistantBody.classList.remove("streaming");
+      els.statTps.textContent = "";
+      els.statTps.className = "stat-tps-label";
+      finishStream(assistantBody, `⚠ ${errText}`, {});
+      return;
+    }
 
     const reader = resp.body.getReader();
     const dec    = new TextDecoder();
@@ -606,14 +685,10 @@ async function runStream(model, history, userText, assistantBody, opts={}) {
         if (!raw) continue;
 
         let payload;
-        try { payload = JSON.parse(raw); } catch(_) { continue; }
+        try { payload = JSON.parse(raw); } catch (_) { continue; }
 
         if (lastEvent === "token") {
           accumulated += payload.token || "";
-          // Preserve the user's manual collapse of a live thinking block across
-          // the full re-render below — otherwise it snaps back open on the
-          // next token (the block auto-expands while its closing tag hasn't
-          // arrived yet).
           const prevThink = assistantBody.querySelector(".think-block");
           const userCollapsed = prevThink && !prevThink.classList.contains("open");
           assistantBody.innerHTML = renderAssistantContent(accumulated);
@@ -633,7 +708,7 @@ async function runStream(model, history, userText, assistantBody, opts={}) {
         } else if (lastEvent === "error") {
           const msg = payload.message || "Unknown error";
           accumulated = `⚠ ${msg}`;
-          assistantBody.innerHTML = `<span class="err-text">${escHtml(msg)}</span>`;
+          assistantBody.innerHTML = renderStreamError(msg, payload);
           assistantBody.classList.remove("streaming");
           break outer;
 
@@ -643,56 +718,55 @@ async function runStream(model, history, userText, assistantBody, opts={}) {
         }
       }
     }
-  } catch(err) {
+  } catch (err) {
     if (err.name === "AbortError") {
       accumulated += (accumulated ? "\n\n" : "") + "*Generation stopped.*";
+      assistantBody.innerHTML = renderAssistantContent(accumulated);
+      assistantBody.classList.remove("streaming");
     } else {
       const msg = err.message || "Connection error";
       accumulated = `⚠ ${msg}`;
-      assistantBody.innerHTML = `<span class="err-text">${escHtml(msg)}</span>`;
+      assistantBody.innerHTML = renderStreamError(msg, {provider: state.backend});
+      assistantBody.classList.remove("streaming");
     }
+    els.statTps.textContent = "";
+    els.statTps.className = "stat-tps-label";
   }
 
   if (state.streaming) finishStream(assistantBody, accumulated, {});
 }
 
-// Regenerate the assistant reply whose .msg wrapper is `wrap`. Drops
-// that reply from state and re-streams from the preceding user turn.
 async function regenerateAt(wrap) {
   if (state.streaming) return;
   const model = els.modelSelect.value;
-  if (!model) { showStatus("Select a model — is Ollama running?", "err"); return; }
+  if (!model) {
+    const tip = state.backend === "mlx"
+      ? "Select a model — is the MLX server running?"
+      : "Select a model — is Ollama running?";
+    showStatus(tip, "err");
+    return;
+  }
 
-  // Find this message's index among rendered messages so we can line
-  // it up with state.messages (they share order: user/assistant pairs).
   const allMsgs = [...els.messages.querySelectorAll(".msg")];
   const idx = allMsgs.indexOf(wrap);
   if (idx === -1) return;
 
-  // Truncate state to everything before this assistant reply, then
-  // drop the assistant turn itself; the trailing user turn becomes
-  // the prompt for the regeneration.
   state.messages = state.messages.slice(0, idx);
   const userTurn = state.messages[state.messages.length - 1];
   if (!userTurn || userTurn.role !== "user") return;
   const userText = userTurn.content;
   const history  = state.messages.slice(0, -1);
 
-  // Replace the old reply bubble with a fresh streaming one in place.
   const freshBody = document.createElement("div");
   freshBody.className = "msg-body streaming";
   const oldBody = wrap.querySelector(".msg-body");
   oldBody.replaceWith(freshBody);
-  // Drop any stale action row so finishStream can re-add the new one.
   wrap.querySelector(".msg-actions")?.remove();
 
   setSendingUI(true);
   await runStream(model, history, userText, freshBody, {regenerate: true});
 }
 
-// Inline-edit a user message: swap its body for a textarea. Save
-// truncates the conversation to that point and regenerates from the
-// edited prompt (discard-and-resend, per the chosen behavior).
 function beginEdit(wrap) {
   if (state.streaming) return;
   const allMsgs = [...els.messages.querySelectorAll(".msg")];
@@ -700,7 +774,7 @@ function beginEdit(wrap) {
   if (idx === -1) return;
 
   const body = wrap.querySelector(".msg-body");
-  if (!body || wrap.querySelector(".msg-edit-wrap")) return; // already editing
+  if (!body || wrap.querySelector(".msg-edit-wrap")) return;
 
   const original = state.messages[idx]?.content || "";
   const holder = document.createElement("div");
@@ -720,8 +794,10 @@ function beginEdit(wrap) {
   holder.appendChild(area); holder.appendChild(btns);
   body.replaceWith(holder);
   area.focus();
-  // Grow to fit and place the cursor at the end.
-  const grow = () => { area.style.height = "auto"; area.style.height = Math.min(area.scrollHeight, 220) + "px"; };
+  const grow = () => {
+    area.style.height = "auto";
+    area.style.height = Math.min(area.scrollHeight, 220) + "px";
+  };
   area.addEventListener("input", grow); grow();
   area.setSelectionRange(area.value.length, area.value.length);
 
@@ -729,10 +805,8 @@ function beginEdit(wrap) {
 
   save.addEventListener("click", async () => {
     const next = area.value.trim();
-    if (!next || !area.value.trim()) { renderMessages(); return; }
+    if (!next) { renderMessages(); return; }
 
-    // Truncate everything from this user message onward, then push the
-    // edited text as the new prompt and regenerate the assistant reply.
     state.messages = state.messages.slice(0, idx);
     const userTs = new Date().toISOString();
     state.messages.push({role: "user", content: next, ts: userTs});
@@ -743,7 +817,13 @@ function beginEdit(wrap) {
     scrollBottom();
 
     const model = els.modelSelect.value;
-    if (!model) { showStatus("Select a model — is Ollama running?", "err"); return; }
+    if (!model) {
+      const tip = state.backend === "mlx"
+        ? "Select a model — is the MLX server running?"
+        : "Select a model — is Ollama running?";
+      showStatus(tip, "err");
+      return;
+    }
     await runStream(model, state.messages.slice(0, -1), next, assistantBody);
   });
 }
@@ -757,16 +837,14 @@ function finishStream(bodyEl, content, stats) {
   const assistantTs = new Date().toISOString();
 
   bodyEl.classList.remove("streaming");
-  bodyEl.innerHTML = renderAssistantContent(content);
-  addCopyListeners(bodyEl);
+  // If the body still shows an error box (set by the error branch), keep it.
+  if (!bodyEl.querySelector(".err-box")) {
+    bodyEl.innerHTML = renderAssistantContent(content);
+    addCopyListeners(bodyEl);
+  }
 
-  // Attach the timestamp + hover-action row to this message wrapper
-  // (the streaming bubble had neither), then re-evaluate which
-  // assistant message owns the Regenerate button.
   const wrap = bodyEl.closest(".msg");
   if (wrap) {
-    // Fresh timestamp above the label, since none was rendered while
-    // streaming. Skip if one already exists (e.g. a re-rendered chat).
     if (!wrap.querySelector(".msg-ts")) {
       const tsEl = document.createElement("div");
       tsEl.className = "msg-ts";
@@ -789,13 +867,11 @@ function finishStream(bodyEl, content, stats) {
     state.lastPromptTok = ptok;
     els.perfInfo.textContent = `${ptok}↑ ${ctok}↓ · ${tps} t/s · ft ${ftMs}ms · ${genS}s`;
     els.statTps.textContent  = tps ? `${tps} t/s` : "";
-    els.statTps.className    = "stat-tps-label" + (tps >= 20 ? " tps-fast" : tps >= 8 ? " tps-mid" : tps ? " tps-slow" : "");
+    els.statTps.className    = "stat-tps-label" +
+      (tps >= 20 ? " tps-fast" : tps >= 8 ? " tps-mid" : tps ? " tps-slow" : "");
     updateCtxStat();
   }
 
-  // runStream pre-pushed a placeholder assistant turn — finalize it
-  // in place with the real content + timestamp rather than pushing a
-  // second entry.
   const last = state.messages[state.messages.length - 1];
   if (last && last.role === "assistant") {
     last.content = content;
@@ -808,7 +884,7 @@ function finishStream(bodyEl, content, stats) {
   persistChat(content);
 }
 
-// ── Context stat (used / total) ───────────────────────────────────────────────
+// ── Context stat ──────────────────────────────────────────────────────────────
 function updateCtxStat() {
   const used  = state.lastPromptTok;
   const total = state.modelCtxLen;
@@ -830,23 +906,15 @@ function updateCtxStat() {
   els.statCtxBarWrap.classList.remove("hidden");
 }
 
-function fmtK(n) {
-  return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
-}
+function fmtK(n) { return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n); }
 
 // ── Persist & title ───────────────────────────────────────────────────────────
-
-/** Best-effort fallback title from a string, used while/if AI title gen is unavailable */
 function fallbackTitle(text) {
-  // Strip markdown, think tags, leading symbols
   let clean = text
     .replace(/<think>[\s\S]*?<\/think>/gi, "")
     .replace(/[#*`>_~\[\]]/g, "")
     .replace(/\s+/g, " ")
     .trim();
-
-  // Drop a common filler opener so the title gets to the actual topic faster,
-  // e.g. "Hey can you help me write a poem" -> "write a poem"
   clean = clean.replace(
     /^(hi|hey|hello|ok|okay|so|well|please|thanks|thank you)[,!. ]+/i, ""
   ).replace(
@@ -854,9 +922,7 @@ function fallbackTitle(text) {
   ).replace(
     /^i (need|want|would like) (you )?to /i, ""
   ).trim();
-
   if (!clean) clean = text.trim();
-
   const words = clean.split(" ").filter(Boolean);
   if (!words.length) return "New chat";
   const title = words.slice(0, 7).join(" ");
@@ -867,36 +933,34 @@ async function persistChat(lastReply = "") {
   const now  = new Date().toISOString();
   let title  = els.chatTitle.textContent;
 
-  // Try (or retry) AI title generation for the first couple of exchanges.
-  // If a prior attempt failed (titleOk === false), keep retrying on each new
-  // message rather than getting permanently stuck on the word-sliced fallback.
   const shouldTryTitle = !state.titleOk && state.messages.length <= 4;
-
   if (shouldTryTitle) {
-    const model     = els.modelSelect.value;
-    const userMsg   = state.messages[0]?.content || "";
-    let   aiTitle   = "";
-    let   ok        = false;
+    const model   = els.modelSelect.value;
+    const userMsg = state.messages[0]?.content || "";
+    let aiTitle   = "";
+    let ok        = false;
     try {
       const r = await API.title(model, userMsg, lastReply);
       aiTitle = (r.title || "").trim();
       ok      = !!r.ok;
-    } catch(_) {}
+    } catch (_) {}
 
     if (ok && aiTitle && aiTitle !== "New chat") {
       title = aiTitle;
       state.titleOk = true;
     } else if (title === "New chat" || !state.titleOk) {
-      // Use a reasonable fallback in the meantime, but leave titleOk false
-      // so we try again next message.
       title = fallbackTitle(lastReply || userMsg);
     }
     els.chatTitle.textContent = title;
   }
 
   const chat = {
-    id: state.chatId, title, created: now, updated: now,
-    messages: state.messages, titleOk: state.titleOk,
+    id:       state.chatId,
+    title,
+    created:  now,
+    updated:  now,
+    messages: state.messages,
+    titleOk:  state.titleOk,
   };
   await API.chatSave(state.chatId, chat);
   await refreshChatList();
@@ -912,17 +976,16 @@ async function addContextPath(pathOverride) {
   const raw = pathOverride || els.contextPathInput.value.trim();
   if (!raw) return;
   setContextStatus("Loading…", "");
-
   try {
     const r = await API.context(raw);
     if (r.error) { setContextStatus(r.error, "err"); return; }
-    r.files.forEach(f => {
+    (r.files || []).forEach(f => {
       if (!state.contextFiles.find(x => x.path === f.path)) state.contextFiles.push(f);
     });
-    setContextStatus(`Added ${r.files.length} file(s)`, "ok");
+    setContextStatus(`Added ${(r.files || []).length} file(s)`, "ok");
     els.contextPathInput.value = "";
     renderContextFiles();
-  } catch(err) {
+  } catch (err) {
     setContextStatus(`Error: ${err.message}`, "err");
   }
 }
@@ -946,34 +1009,71 @@ function renderContextFiles() {
     });
     els.contextFileList.appendChild(item);
   });
-
   const n = state.contextFiles.length;
   if (n > 0) {
-    els.contextBadge.textContent = `${n} file${n!==1?"s":""} attached`;
+    els.contextBadge.textContent = `${n} file${n !== 1 ? "s" : ""} attached`;
     els.contextBadge.classList.remove("hidden");
   } else {
     els.contextBadge.classList.add("hidden");
   }
 }
 
-// ── File browser (native dialog via server) ───────────────────────────────────
-async function openFileBrowser() {
-  try {
-    const d = await API.browse("file");
-    if (!d.path) return;
-    // Open context panel
-    els.contextPanel.classList.remove("hidden");
-    els.btnContext.classList.add("active");
-    els.contextPathInput.value = d.path;
-    addContextPath(d.path);
-  } catch(err) {
-    showStatus("Browse failed: " + err.message, "err");
+function openFileBrowser() {
+  if (els.filePicker) {
+    els.filePicker.click();
+    return;
+  }
+  showStatus("Browse unavailable in this browser.", "err");
+}
+
+async function addBrowserFiles(fileList) {
+  const files = Array.from(fileList || []);
+  if (!files.length) return;
+
+  els.contextPanel.classList.remove("hidden");
+  els.btnContext.classList.add("active");
+  setContextStatus("Reading files…", "");
+
+  const warnings = [];
+  let added = 0;
+
+  for (const file of files) {
+    if (!file || !file.name) continue;
+    if (file.size > 512 * 1024) {
+      warnings.push(`${file.name} is larger than 512 KB`);
+      continue;
+    }
+    try {
+      const content = await file.text();
+      const path = `browser://${file.name}/${file.size}/${file.lastModified}`;
+      if (state.contextFiles.find(x => x.path === path)) continue;
+      state.contextFiles.push({
+        path,
+        label: file.name,
+        content,
+      });
+      added += 1;
+    } catch (err) {
+      warnings.push(`Could not read ${file.name}: ${err.message}`);
+    }
+  }
+
+  renderContextFiles();
+  if (added) {
+    setContextStatus(`Added ${added} file${added !== 1 ? "s" : ""}`, "ok");
+  } else if (warnings.length) {
+    setContextStatus(warnings[0], "err");
+  } else {
+    setContextStatus("No files added", "warn");
+  }
+
+  if (warnings.length > 1) {
+    showStatus(warnings.slice(1).join(" · "), "err");
   }
 }
 
 // ── Stats polling ─────────────────────────────────────────────────────────────
 let statsTimer = null;
-
 function startStatsPoller() {
   updateStats();
   statsTimer = setInterval(updateStats, 10000);
@@ -981,8 +1081,6 @@ function startStatsPoller() {
 
 async function updateStats() {
   const model = els.modelSelect.value;
-
-  // No model selected yet — show an idle state, not stale numbers.
   if (!model) {
     els.statDevice.textContent     = "⬡ no model";
     els.statDevice.className       = "stat-device-label";
@@ -993,14 +1091,9 @@ async function updateStats() {
     updateCtxStat();
     return;
   }
-
   try {
     const s = await API.ps(model);
 
-    // ── Device / accelerator badge ────────────────────────────────
-    // accelerator is one of: Metal (Apple Silicon), GPU (discrete/CUDA),
-    // or CPU (no offload). Color accordingly so the row is meaningful
-    // on and off Apple Silicon.
     const accel = s.accelerator || s.device || "";
     if (accel) {
       els.statDevice.textContent = `⬡ ${accel}`;
@@ -1009,21 +1102,17 @@ async function updateStats() {
       else if (accel === "CPU")                  cls += " device-cpu";
       els.statDevice.className = cls;
     } else {
-      els.statDevice.textContent = "⬡ Ollama";
+      els.statDevice.textContent = `⬡ ${state.backend || "ollama"}`;
       els.statDevice.className = "stat-device-label";
     }
 
-    // ── Model info row: "7B · Q4_K_M" (or model name if details missing) ──
     const parts = [];
     if (s.parameter_size) parts.push(s.parameter_size);
     if (s.quantization)   parts.push(s.quantization);
     els.statModelInfo.textContent = parts.length
       ? parts.join(" · ")
-      : (model ? model.split(":")[0] : "—");
+      : (model ? model.split(":")[0].split("/").pop() : "—");
 
-    // ── Memory row ─────────────────────────────────────────────────
-    // Label adapts to the machine: "VRAM" for discrete GPUs, "Memory"
-    // for Apple Silicon unified memory, or when running on CPU.
     const unified = s.memory_kind === "unified" || accel === "Metal" || accel === "CPU";
     els.statVramKey.textContent = unified ? "Memory" : "VRAM";
 
@@ -1034,7 +1123,6 @@ async function updateStats() {
       const pct = Math.min(100, Math.round((used / total) * 100));
       els.statVram.textContent = `${fmtMB(used)} / ${fmtMB(total)} (${pct}%)`;
       els.statVramBar.style.width = pct + "%";
-      // Order matters: check the higher threshold first.
       els.statVramBar.className = "stat-bar" +
         (pct > 95 ? " bar-danger" : pct > 85 ? " bar-warn" : "");
       els.statVramBarWrap.classList.remove("hidden");
@@ -1045,7 +1133,6 @@ async function updateStats() {
       els.statVram.textContent = "CPU only";
       els.statVramBarWrap.classList.add("hidden");
     } else if (s.model_loaded === false) {
-      // Model isn't resident yet (e.g. just selected, never chatted).
       els.statVram.textContent = "idle";
       els.statVramBarWrap.classList.add("hidden");
     } else {
@@ -1053,10 +1140,9 @@ async function updateStats() {
       els.statVramBarWrap.classList.add("hidden");
     }
 
-    // Store model context length for the ctx% display.
     if (s.context_length) state.modelCtxLen = s.context_length;
     updateCtxStat();
-  } catch(_) {
+  } catch (_) {
     els.statDevice.textContent    = "⬡ offline";
     els.statDevice.className      = "stat-device-label";
     els.statVramKey.textContent   = "Memory";
@@ -1074,8 +1160,8 @@ function fmtMB(mb) {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function escHtml(s) {
   return String(s)
-    .replace(/&/g,"&amp;").replace(/</g,"&lt;")
-    .replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
 function resizeTextarea() {
@@ -1084,31 +1170,24 @@ function resizeTextarea() {
 }
 
 // ── Draft persistence ─────────────────────────────────────────────────────────
-// Stash unsent textarea text per-chat so switching chats (or reloading)
-// doesn't lose what the user was typing. Lives in localStorage; cleared
-// on send. Keyed by chat id.
 function draftKey() { return `sullybase:draft:${state.chatId || "default"}`; }
 function saveDraft() {
   const v = els.userInput.value;
   try {
     if (v) localStorage.setItem(draftKey(), v);
     else   localStorage.removeItem(draftKey());
-  } catch(_) {}
+  } catch (_) {}
 }
 function loadDraft() {
   try {
     els.userInput.value = localStorage.getItem(draftKey()) || "";
-  } catch(_) { els.userInput.value = ""; }
+  } catch (_) { els.userInput.value = ""; }
   resizeTextarea();
   if (!state.streaming) els.btnSend.disabled = !els.userInput.value.trim();
 }
-function clearDraft() {
-  try { localStorage.removeItem(draftKey()); } catch(_) {}
-}
+function clearDraft() { try { localStorage.removeItem(draftKey()); } catch (_) {} }
 
 // ── Scroll-to-bottom button ───────────────────────────────────────────────────
-// Show a floating ↓ when the user has scrolled up from the newest
-// message; hide it while streaming (auto-scroll is already active).
 function onMessagesScroll() {
   if (state.streaming) { els.btnScrollBottom.classList.remove("show"); return; }
   const wrap = els.messagesWrap;
@@ -1117,8 +1196,6 @@ function onMessagesScroll() {
 }
 
 // ── Keyboard shortcuts ────────────────────────────────────────────────────────
-// Cmd/Ctrl+N → new chat, Cmd/Ctrl+K → focus search, Esc → close panels/dialogs.
-// Suppressed while typing in a text field for N/K; Esc always works.
 function onGlobalKeydown(e) {
   const mod = e.metaKey || e.ctrlKey;
   const typing = /^(input|textarea)$/i.test(e.target.tagName) || e.target.isContentEditable;
@@ -1134,9 +1211,7 @@ function onGlobalKeydown(e) {
   }
 
   if (mod && (e.key === "n" || e.key === "N") && !typing) {
-    e.preventDefault();
-    newChat();
-    return;
+    e.preventDefault(); newChat(); return;
   }
   if (mod && (e.key === "k" || e.key === "K")) {
     e.preventDefault();
@@ -1146,8 +1221,14 @@ function onGlobalKeydown(e) {
   }
 }
 
+// Persist current_chat_id and active model selection.
 function saveSettings() {
-  API.settingsSave({model: state.model, current_chat_id: state.chatId}).catch(()=>{});
+  API.settingsSave({
+    backend:         state.backend,
+    current_chat_id: state.chatId,
+    model_ollama:    state.backend === "ollama" ? state.model : undefined,
+    model_mlx:       state.backend === "mlx"    ? state.model : undefined,
+  }).catch(() => {});
 }
 
 function showStatus(msg, type) {
@@ -1194,21 +1275,20 @@ function attachEventListeners() {
     saveDraft();
   });
 
-  // Scroll-to-bottom button + live show/hide on scroll.
   els.btnScrollBottom.addEventListener("click", () => scrollBottom(true));
   els.messagesWrap.addEventListener("scroll", onMessagesScroll);
 
-  // Global keyboard shortcuts.
   document.addEventListener("keydown", onGlobalKeydown);
 
   els.modelSelect.addEventListener("change", () => {
-    state.model    = els.modelSelect.value;
-    state.modelCtxLen = 0;
+    state.model        = els.modelSelect.value;
+    state.modelCtxLen  = 0;
+    persistActiveModel();
     saveSettings();
     updateStats();
     document.querySelectorAll(".msg.assistant .msg-label").forEach(el => {
       el.textContent = state.model
-        ? state.model.split(":")[0].replace(/-/g," ")
+        ? state.model.split(":")[0].split("/").pop().replace(/-/g, " ")
         : "Assistant";
     });
   });
@@ -1217,6 +1297,10 @@ function attachEventListeners() {
   els.btnClear.addEventListener("click", clearContext);
   els.btnContext.addEventListener("click", toggleContextPanel);
   els.btnBrowse.addEventListener("click", openFileBrowser);
+  els.filePicker.addEventListener("change", e => {
+    addBrowserFiles(e.target.files);
+    e.target.value = "";
+  });
 
   els.btnRefreshModels.addEventListener("click", async () => {
     els.btnRefreshModels.classList.add("spinning");

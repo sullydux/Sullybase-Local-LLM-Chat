@@ -6,18 +6,21 @@
 
 # [Sullybase Local LLM Chat](https://sullydux.github.io/Sullybase-Local-LLM-Chat/)
 
-v2.4.1
+v2.5.1
 </div>
 
-A lightweight desktop app for chatting with local LLMs via **Ollama**. All conversations stay on your device — no external data transmission.
+A lightweight desktop app for chatting with local LLMs via **Ollama** or **MLX LM Server**. All conversations stay on your device — no external data transmission.
+Built with AI assistance.
 
 ---
 
 ## Architecture
 
-The app is built on a **Flask + pywebview** stack:
+The app is built on a **Flask + pywebview** stack with provider-specific backends:
 
-- `server.py` — Flask backend: Ollama API proxy, chat/settings persistence, context file loading, file browser
+- `server.py` — Flask backend router: selects the active provider, persists chats/settings, loads context files, and serves the file browser
+- `ollama_server.py` — Ollama adapter: wraps Ollama's HTTP API
+- `mlx_server.py` — MLX adapter: wraps MLX LM Server's OpenAI-compatible API
 - `app.py` — Desktop launcher: starts Flask in a daemon thread, waits for it to be ready, then opens a pywebview window
 - `index.html` / `app.js` / `style.css` — Frontend served by Flask as static files
 
@@ -29,9 +32,9 @@ Chats and settings are stored as JSON files in the app support directory:
 ## Features
 
 ### Sidebar
-- **Model selector** with refresh button — lists all locally available Ollama models
+- **Model selector** with refresh button — lists all locally available models for the active backend
 - **Chat history** — browse, search (with snippet preview), and switch between past conversations
-- **Stats panel** — live GPU/CPU device badge, VRAM usage bar, context window usage bar, tokens/sec
+- **Stats panel** — live device badge, memory usage bar, context window usage bar, tokens/sec
 
 ### Chat Interface
 - **Streaming responses** with blinking cursor and stop button
@@ -54,12 +57,23 @@ Shows prompt tokens ↑, completion tokens ↓, tokens/sec, first-token latency,
 
 - **Python 3.14+**
 - Dependencies: see `requirements.txt` (`flask`, `pywebview`, `requests`)
-- **[Ollama](https://ollama.comhttps://ollama.comvv)** installed and running. Install by:
-• Clicking the link above, or
-• Running this in terminal
-  ```bash
-   curl -fsSL https://ollama.com/install.sh | sh
-   ```
+- **[Ollama](https://ollama.com)** installed and running for the Ollama backend.
+- **MLX LM Server** installed and running for the MLX backend on Apple Silicon.
+
+Install and start either backend:
+
+```bash
+# Ollama
+curl -fsSL https://ollama.com/install.sh | sh
+open /Applications/Ollama.app
+# or: ollama serve
+
+# MLX LM Server
+pip install mlx-lm
+python -m mlx_lm.server --model <model>
+```
+
+Replace `<model>` with your chosen MLX model id, for example `mlx-community/Llama-3.2-3B-Instruct-4bit`.
 
 ---
 
@@ -74,7 +88,7 @@ Shows prompt tokens ↑, completion tokens ↓, tokens/sec, first-token latency,
    ```bash
    python app.py
    ```
-4. **Connect Ollama** — open Ollama, then click **↻** in the sidebar to load models
+4. **Connect your backend** — open Ollama or start MLX, then click **↻** in the sidebar to load models
 
 ### Optional: macOS Automator Shortcut
 
@@ -93,16 +107,16 @@ You can create a double-clickable launcher using Automator:
 
 ## Notes
 
-- **Privacy**: All data stays local — no external network calls except to `localhost:11434` (Ollama)
+- **Privacy**: All data stays local — no external network calls except to your local Ollama or MLX server
 - **Logging**: Rotating logs written to the app support directory (`logs/sullybase.log`)
 - **Thinking models**: Thinking is parsed and shown as collapsible sections
-- **macOS file browser**: Uses `osascript` (AppleScript) to avoid thread-safety issues with tkinter
+- **macOS file browser**: Uses a best-effort native `tkinter` file dialog from the Flask backend and falls back cleanly if the dialog cannot open
 
 ---
 
 ## Model Support
 
-Developed and tested on an Apple M2 Air (8 GB RAM) with `qwen2.5-coder:3b` and 'qwen3.5:4b-mlx'. Any Ollama-compatible model should work given sufficient RAM and compute.
+Developed and tested on an Apple M2 Air (8 GB RAM) with `qwen2.5-coder:3b` and `qwen3.5:4b-mlx`. Any compatible Ollama or MLX model should work given sufficient RAM and compute.
 
 ---
 

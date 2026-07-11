@@ -25,6 +25,7 @@
   <div id="model-section">
     <div class="model-label-row">
       <label class="section-label">Model</label>
+      <span id="backend-badge" class="backend-badge" title="Active backend">ollama</span>
       <button id="btn-refresh-models" title="Refresh model list" class="btn-icon-small">↻</button>
     </div>
     <div class="select-wrap">
@@ -80,7 +81,7 @@
   </div>
 </aside>
 
-<!-- ═══════════════════════════════════════════ MAIN -->
+<!-- ═════════════════════════════════ MAIN -->
 <main id="main">
   <header id="topbar">
     <span id="chat-title">New chat</span>
@@ -124,7 +125,7 @@
       <div id="empty-state">
         <div class="empty-icon">◈</div>
         <div class="empty-title">Sullybase Local LLM Chat</div>
-        <div class="empty-sub">Local AI chat — powered by Ollama · <span id="empty-version">v…</span></div>
+        <div class="empty-sub">Local AI chat — Ollama or MLX · <span id="empty-version">v…</span></div>
       </div>
     </div>
     <button id="btn-scroll-bottom" class="hidden" title="Scroll to bottom">
@@ -166,7 +167,7 @@
 </dialog>
 
 <!-- File browse input (hidden) -->
-<input type="file" id="file-picker" style="display:none">
+<input type="file" id="file-picker" style="display:none" multiple>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/9.1.6/marked.min.js"></script>
