@@ -191,6 +191,49 @@ body { display: flex; height: 100vh; }
 #model-select:hover, #model-select:focus { border-color: var(--green-dim); }
 option { background: var(--bg3); }
 
+#mlx-launch-wrap {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+#btn-mlx-launch {
+  width: 100%;
+  min-height: 28px;
+  border-radius: 6px;
+  border: 1px solid rgba(96,165,250,.32);
+  background: linear-gradient(180deg, rgba(96,165,250,.18), rgba(96,165,250,.10));
+  color: #9ac7ff;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: .01em;
+  padding: 5px 10px;
+  transition: transform .12s, border-color .12s, background .12s, color .12s;
+}
+#btn-mlx-launch:hover:not(:disabled) {
+  border-color: rgba(96,165,250,.55);
+  background: linear-gradient(180deg, rgba(96,165,250,.24), rgba(96,165,250,.14));
+  color: #b8d9ff;
+  transform: translateY(-1px);
+}
+#btn-mlx-launch:active:not(:disabled) { transform: translateY(0); }
+#btn-mlx-launch:disabled {
+  opacity: .72;
+  cursor: progress;
+}
+
+.mlx-launch-status {
+  min-height: 13px;
+  font-size: 10.5px;
+  line-height: 1.35;
+  color: var(--text3);
+  word-break: break-word;
+}
+.mlx-launch-status.ok { color: var(--green-dim); }
+.mlx-launch-status.err { color: var(--danger); }
+.mlx-launch-status.warn { color: var(--warn); }
+
 /* ── Chat list ──────────────────────────────────────────────── */
 #chat-list-header { padding: 10px 10px 4px; }
 

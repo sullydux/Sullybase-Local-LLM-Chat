@@ -28,6 +28,7 @@ const DEFAULTS = {
   mlx_url:             "http://localhost:8080",
   model_ollama:        "llama3.2",
   model_mlx:           "mlx-community/Llama-3.2-3B-Instruct-4bit",
+  mlx_launch_button_enabled: true,
   custom_instructions: "",
   current_chat_id:     "",
   last_model_ollama:   "",
@@ -44,6 +45,7 @@ const els = {
   mlxUrl:         $("inp-mlx-url"),
   modelOllama:    $("inp-model-ollama"),
   modelMlx:       $("inp-model-mlx"),
+  mlxLaunchButton:$("inp-mlx-launch-button"),
   mlxInstallCmd:  $("mlx-install-cmd"),
   mlxStartCmd:    $("mlx-start-cmd"),
   customInstr:    $("inp-custom-instructions"),
@@ -94,6 +96,7 @@ async function loadSettings() {
       mlx_url:             s.mlx_url             || DEFAULTS.mlx_url,
       model_ollama:        s.model_ollama        || DEFAULTS.model_ollama,
       model_mlx:           s.model_mlx           || DEFAULTS.model_mlx,
+      mlx_launch_button_enabled: s.mlx_launch_button_enabled !== false,
       custom_instructions: s.custom_instructions || "",
       current_chat_id:     s.current_chat_id     || "",
       last_model_ollama:   s.last_model_ollama   || "",
@@ -112,8 +115,9 @@ function renderSettingsUI() {
   if (els.mlxUrl)      els.mlxUrl.value         = loaded.mlx_url;
   if (els.modelOllama) els.modelOllama.value    = loaded.model_ollama;
   if (els.modelMlx)    els.modelMlx.value       = loaded.model_mlx;
+  if (els.mlxLaunchButton) els.mlxLaunchButton.checked = !!loaded.mlx_launch_button_enabled;
   if (els.mlxInstallCmd) els.mlxInstallCmd.textContent = MLX_INSTALL_COMMAND;
-  if (els.mlxStartCmd)   els.mlxStartCmd.textContent   = MLX_START_COMMAND;
+  updateMlxStartCommandPreview();
   if (els.customInstr) els.customInstr.value    = loaded.custom_instructions;
   updateCharCount();
   updateBackendVisibility();
@@ -136,6 +140,12 @@ function updateDebugInfo() {
   }
 }
 
+function updateMlxStartCommandPreview() {
+  if (!els.mlxStartCmd || !els.modelMlx) return;
+  const model = (els.modelMlx.value || DEFAULTS.model_mlx).trim() || DEFAULTS.model_mlx;
+  els.mlxStartCmd.textContent = `python -m mlx_lm.server --model ${model}`;
+}
+
 function attachListeners() {
   if (els.backend)  els.backend.addEventListener("change", onBackendChange);
   if (els.ollamaUrl) {
@@ -148,6 +158,7 @@ function attachListeners() {
   }
   if (els.modelOllama) els.modelOllama.addEventListener("input", onInput);
   if (els.modelMlx)    els.modelMlx.addEventListener("input",    onInput);
+  if (els.mlxLaunchButton) els.mlxLaunchButton.addEventListener("change", onInput);
   if (els.customInstr) els.customInstr.addEventListener("input", onCustomInstrChange);
   if (els.btnSave)     els.btnSave.addEventListener("click",  saveSettings);
   if (els.btnReset)    els.btnReset.addEventListener("click",  resetSettings);
@@ -164,7 +175,7 @@ function attachListeners() {
 
 function onBackendChange() { updateBackendVisibility(); markDirty(); }
 function onURLChange()     { updateDebugInfo(); markDirty(); }
-function onInput()         { markDirty(); }
+function onInput()         { updateMlxStartCommandPreview(); markDirty(); }
 function onCustomInstrChange() { updateCharCount(); markDirty(); }
 
 function updateCharCount() {
@@ -283,6 +294,7 @@ async function saveSettings() {
       mlx_url:             (els.mlxUrl    ? els.mlxUrl.value    : "") || DEFAULTS.mlx_url,
       model_ollama:        els.modelOllama ? els.modelOllama.value : "",
       model_mlx:           els.modelMlx    ? els.modelMlx.value    : "",
+      mlx_launch_button_enabled: els.mlxLaunchButton ? !!els.mlxLaunchButton.checked : DEFAULTS.mlx_launch_button_enabled,
       custom_instructions: els.customInstr ? els.customInstr.value : "",
       current_chat_id:     loaded.current_chat_id || "",
       last_model_ollama:   loaded.last_model_ollama || "",

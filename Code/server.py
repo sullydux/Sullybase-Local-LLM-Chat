@@ -44,9 +44,11 @@ from __future__ import annotations
 import json
 import logging
 import os
+import subprocess
 import sys
 import time
 import traceback
+import shlex
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Generator, List, Optional, Tuple
@@ -105,6 +107,7 @@ _DEFAULT_SETTINGS: Dict[str, Any] = {
     "mlx_url":             MLX_BASE,
     "model_ollama":        DEFAULT_MODEL_OLLAMA,
     "model_mlx":           DEFAULT_MODEL_MLX,
+    "mlx_launch_button_enabled": True,
     "current_chat_id":     "",
     "custom_instructions": "",
     "last_model_ollama":   "",  # last user-selected model under ollama
@@ -186,6 +189,131 @@ def _delete_chat(chat_id: str) -> bool:
 
 def _get_version() -> str:
     return APP_VERSION
+
+
+def _logs_root() -> Path:
+    return SUPPORT_DIR / "logs"
+
+
+def _mlx_launch_root() -> Path:
+    return _logs_root() / "mlx-launch"
+
+
+def _create_mlx_launch_dir() -> Path:
+    ts = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+    base = _mlx_launch_root() / ts
+    path = base
+    suffix = 1
+    while path.exists():
+        path = _mlx_launch_root() / f"{ts}-{suffix}"
+        suffix += 1
+    path.mkdir(parents=True, exist_ok=False)
+    return path
+
+
+def _write_text(path: Path, content: str) -> None:
+    path.write_text(content, encoding="utf-8")
+
+
+def _launch_mlx_server(settings: Dict[str, Any]) -> Dict[str, Any]:
+    backend = MLXBackend(settings.get("mlx_url") or MLX_BASE)
+    if backend.health_check():
+        return {
+            "ok": True,
+            "status": "already_running",
+            "message": "MLX server is already reachable.",
+            "command": None,
+            "log_dir": None,
+        }
+
+    model = get_default_model_for("mlx", settings).strip()
+    if not model:
+        return {
+            "ok": False,
+            "status": "error",
+            "message": "No MLX default model is configured in Settings.",
+            "log_dir": None,
+        }
+
+    launch_dir = _create_mlx_launch_dir()
+    command_display = f"python -m mlx_lm.server --model {shlex.quote(model)}"
+    command_args = [sys.executable, "-u", "-m", "mlx_lm.server", "--model", model]
+    env = os.environ.copy()
+    env["PYTHONUNBUFFERED"] = "1"
+
+    meta = {
+        "command": command_display,
+        "executable": sys.executable,
+        "model": model,
+        "backend_url": settings.get("mlx_url") or MLX_BASE,
+        "cwd": str(Path(__file__).resolve().parent),
+        "started_at": datetime.now().isoformat(),
+    }
+    _write_text(launch_dir / "command.txt", command_display + "\n")
+    _write_json(launch_dir / "launch.json", meta)
+
+    stdout_path = launch_dir / "stdout.log"
+    stderr_path = launch_dir / "stderr.log"
+    try:
+        with stdout_path.open("ab") as stdout_fh, stderr_path.open("ab") as stderr_fh:
+            proc = subprocess.Popen(
+                command_args,
+                stdout=stdout_fh,
+                stderr=stderr_fh,
+                cwd=str(Path(__file__).resolve().parent),
+                env=env,
+                start_new_session=True,
+            )
+            meta["pid"] = proc.pid
+            meta["status"] = "starting"
+            _write_json(launch_dir / "launch.json", meta)
+
+            deadline = time.monotonic() + 2.0
+            while time.monotonic() < deadline:
+                rc = proc.poll()
+                if rc is not None:
+                    time.sleep(0.1)
+                    stderr_text = ""
+                    try:
+                        stderr_text = stderr_path.read_text(encoding="utf-8", errors="replace").strip()
+                    except Exception:
+                        pass
+                    meta["status"] = "error"
+                    meta["returncode"] = rc
+                    meta["finished_at"] = datetime.now().isoformat()
+                    _write_json(launch_dir / "launch.json", meta)
+                    return {
+                        "ok": False,
+                        "status": "error",
+                        "message": f"MLX server exited immediately with code {rc}.",
+                        "returncode": rc,
+                        "log_dir": str(launch_dir),
+                        "command": command_display,
+                        "stderr": stderr_text[-4000:] if stderr_text else "",
+                    }
+                time.sleep(0.1)
+    except Exception as exc:
+        error_text = f"{type(exc).__name__}: {exc}"
+        _write_text(stderr_path, error_text + "\n")
+        meta["status"] = "error"
+        meta["error"] = error_text
+        _write_json(launch_dir / "launch.json", meta)
+        return {
+            "ok": False,
+            "status": "error",
+            "message": f"Failed to start MLX server: {exc}",
+            "log_dir": str(launch_dir),
+            "command": command_display,
+        }
+
+    return {
+        "ok": True,
+        "status": "starting",
+        "message": "MLX server launch started.",
+        "pid": meta.get("pid"),
+        "log_dir": str(launch_dir),
+        "command": command_display,
+    }
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -304,6 +432,8 @@ def _register_routes(app: Flask) -> None:
         if request.method == "GET":
             data = _settings.load()
             data["version"] = _get_version()
+            data["platform"] = sys.platform
+            data["is_macos"] = sys.platform == "darwin"
             return jsonify(data)
         try:
             data = request.get_json(silent=True) or {}
@@ -382,6 +512,27 @@ def _register_routes(app: Flask) -> None:
             logger.error(f"api_backend_info: {e}")
             return jsonify({"backend": backend_name, "status": "error",
                             "error": str(e)}), 500
+
+    @app.route("/api/mlx/start", methods=["POST"])
+    def api_mlx_start():
+        if sys.platform != "darwin":
+            return jsonify({
+                "ok": False,
+                "status": "unsupported",
+                "message": "MLX launch is only available on macOS.",
+            }), 400
+        settings = _settings.load()
+        try:
+            result = _launch_mlx_server(settings)
+            status = 200 if result.get("ok") else 500
+            return jsonify(result), status
+        except Exception as e:
+            logger.error(f"api_mlx_start: {e}")
+            return jsonify({
+                "ok": False,
+                "status": "error",
+                "message": str(e),
+            }), 500
 
     @app.route("/api/model/<path:model>/info")
     def api_model_info(model: str):

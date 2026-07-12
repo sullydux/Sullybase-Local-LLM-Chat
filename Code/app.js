@@ -12,6 +12,7 @@ const API = {
   version:    ()      => fetch("/api/version").then(r => r.json()),
   models:     ()      => fetch("/api/models").then(r => r.json()),
   ps:         (model) => fetch(`/api/ps?model=${encodeURIComponent(model)}`).then(r => r.json()),
+  launchMlx:  ()      => fetch("/api/mlx/start", {method: "POST"}).then(r => r.json()),
   title:      (model, text, reply) => fetch("/api/title", _json({model, text, reply})).then(r => r.json()),
   chats:      ()      => fetch("/api/chats").then(r => r.json()),
   search:     (q)     => fetch(`/api/search?q=${encodeURIComponent(q)}`).then(r => r.json()),
@@ -38,6 +39,10 @@ const state = {
   contextFiles:  [],
   model:         "",
   backend:       "ollama",     // active backend: ollama | mlx
+  isMacOS:       false,
+  mlxLaunchEnabled: true,
+  mlxLaunchBusy: false,
+  mlxLaunchPoll: null,
   streaming:     false,
   pendingDel:    null,
   firstTokenMs:  0,
@@ -84,6 +89,9 @@ const els = {
   btnSend:          $("btn-send"),
   btnNewChat:       $("btn-new-chat"),
   btnRefreshModels: $("btn-refresh-models"),
+  mlxLaunchWrap:    $("mlx-launch-wrap"),
+  btnMlxLaunch:     $("btn-mlx-launch"),
+  mlxLaunchStatus:  $("mlx-launch-status"),
   btnContext:       $("btn-context"),
   btnBrowse:        $("btn-browse"),
   btnClear:         $("btn-clear"),
@@ -123,6 +131,8 @@ async function loadSettings() {
   try {
     const s = await API.settings();
     state.backend = s.backend || "ollama";
+    state.isMacOS = s.is_macos !== undefined ? !!s.is_macos : /Mac/.test(navigator.platform || "");
+    state.mlxLaunchEnabled = s.mlx_launch_button_enabled !== false;
     // Use the per-provider default model — fall back to whatever the
     // backend reports as available.
     const modelKey = state.backend === "mlx" ? "model_mlx" : "model_ollama";
@@ -138,6 +148,7 @@ async function loadSettings() {
     }
     if (s.current_chat_id) state.chatId = s.current_chat_id;
     updateBackendBadge();
+    updateMlxLaunchControls();
   } catch (_) {}
 }
 
@@ -157,6 +168,7 @@ async function loadModels() {
     const online = !!resp.online;
     state.backend = resp.backend || state.backend || "ollama";
     updateBackendBadge();
+    updateMlxLaunchControls();
 
     els.modelSelect.innerHTML = "";
 
@@ -171,6 +183,7 @@ async function loadModels() {
       els.modelSelect.appendChild(opt);
       els.statDevice.textContent = "⬡ offline";
       els.statDevice.className   = "stat-device-label";
+      updateMlxLaunchControls();
       return;
     }
 
@@ -186,6 +199,7 @@ async function loadModels() {
     }
     els.modelSelect.value = state.model;
     persistActiveModel();
+    updateMlxLaunchControls();
   } catch (_) {
     els.modelSelect.innerHTML =
       `<option value="">${state.backend === "mlx"
@@ -193,6 +207,7 @@ async function loadModels() {
         : "Run Ollama"}</option>`;
     els.statDevice.textContent = "⬡ offline";
     els.statDevice.className   = "stat-device-label";
+    updateMlxLaunchControls();
   }
 }
 
@@ -202,6 +217,132 @@ function persistActiveModel() {
   const key = state.backend === "mlx" ? "model_mlx" : "model_ollama";
   // Don't wait — fire and forget.
   API.settingsKey(key, state.model).catch(() => {});
+}
+
+function updateMlxLaunchControls() {
+  if (!els.mlxLaunchWrap || !els.btnMlxLaunch) return;
+
+  const show = !!state.isMacOS && state.backend === "mlx" && state.mlxLaunchEnabled;
+  els.mlxLaunchWrap.classList.toggle("hidden", !show);
+
+  if (!show) {
+    state.mlxLaunchBusy = false;
+    if (els.mlxLaunchStatus) els.mlxLaunchStatus.textContent = "";
+    els.btnMlxLaunch.disabled = false;
+    els.btnMlxLaunch.textContent = "Start MLX server";
+    return;
+  }
+
+  if (state.mlxLaunchBusy) {
+    els.btnMlxLaunch.disabled = true;
+    els.btnMlxLaunch.textContent = "Starting…";
+  } else {
+    els.btnMlxLaunch.disabled = false;
+    els.btnMlxLaunch.textContent = "Start MLX server";
+  }
+}
+
+function setMlxLaunchStatus(message, kind = "") {
+  if (!els.mlxLaunchStatus) return;
+  els.mlxLaunchStatus.textContent = message || "";
+  els.mlxLaunchStatus.className = kind ? `mlx-launch-status ${kind}` : "mlx-launch-status";
+}
+
+async function startMlxServer() {
+  if (!state.isMacOS) {
+    showStatus("MLX launch is available on macOS only.", "warn");
+    return;
+  }
+  if (state.backend !== "mlx") {
+    showStatus("Switch the backend to MLX before launching the server.", "warn");
+    return;
+  }
+  if (!state.mlxLaunchEnabled) {
+    showStatus("Enable the MLX launch button in Settings first.", "warn");
+    return;
+  }
+  if (state.mlxLaunchBusy) return;
+
+  state.mlxLaunchBusy = true;
+  setMlxLaunchStatus("Launching MLX server…", "");
+  updateMlxLaunchControls();
+
+  let keepPolling = false;
+  try {
+    const resp = await API.launchMlx();
+    if (!resp || !resp.ok) {
+      const msg = (resp && resp.message) || "Failed to launch MLX server.";
+      setMlxLaunchStatus(msg, "err");
+      showStatus(msg, "err");
+      return;
+    }
+
+    if (resp.status === "already_running") {
+      const msg = resp.message || "MLX server is already running.";
+      setMlxLaunchStatus(msg, "ok");
+      showStatus(msg, "ok");
+      await loadModels();
+      updateStats();
+      return;
+    }
+
+    keepPolling = true;
+    const logHint = resp.log_dir ? ` Logs: ${resp.log_dir.split("/").slice(-2).join("/")}.` : "";
+    const msg = (resp.message || "MLX server launch started.") + logHint;
+    setMlxLaunchStatus(msg, "ok");
+    showStatus(msg, "ok");
+    scheduleMlxStartupPoll();
+  } catch (err) {
+    const msg = `Failed to launch MLX server: ${err.message || err}`;
+    setMlxLaunchStatus(msg, "err");
+    showStatus(msg, "err");
+  } finally {
+    if (!keepPolling) {
+      state.mlxLaunchBusy = false;
+      updateMlxLaunchControls();
+    }
+  }
+}
+
+function scheduleMlxStartupPoll() {
+  if (state.mlxLaunchPoll) clearTimeout(state.mlxLaunchPoll);
+
+  const startedAt = Date.now();
+  const maxWaitMs = 120000;
+
+  const tick = async () => {
+    try {
+      const resp = await API.models();
+      const online = !!resp.online && resp.backend === "mlx";
+      if (online) {
+        if (state.mlxLaunchPoll) {
+          clearTimeout(state.mlxLaunchPoll);
+          state.mlxLaunchPoll = null;
+        }
+        state.mlxLaunchBusy = false;
+        updateMlxLaunchControls();
+        setMlxLaunchStatus("MLX server is online.", "ok");
+        await loadModels();
+        updateStats();
+        return;
+      }
+    } catch (_) {}
+
+    if (Date.now() - startedAt >= maxWaitMs) {
+      if (state.mlxLaunchPoll) {
+        clearTimeout(state.mlxLaunchPoll);
+        state.mlxLaunchPoll = null;
+      }
+      state.mlxLaunchBusy = false;
+      updateMlxLaunchControls();
+      setMlxLaunchStatus("MLX is still starting. Check the launch logs if it does not come online soon.", "warn");
+      return;
+    }
+
+    state.mlxLaunchPoll = setTimeout(tick, 1500);
+  };
+
+  state.mlxLaunchPoll = setTimeout(tick, 1500);
 }
 
 // ── Chat list ─────────────────────────────────────────────────────────────────
@@ -1307,6 +1448,10 @@ function attachEventListeners() {
     await loadModels();
     els.btnRefreshModels.classList.remove("spinning");
   });
+
+  if (els.btnMlxLaunch) {
+    els.btnMlxLaunch.addEventListener("click", startMlxServer);
+  }
 
   els.btnContextAdd.addEventListener("click", () => addContextPath());
   els.contextPathInput.addEventListener("keydown", e => {
