@@ -49,6 +49,7 @@ import sys
 import time
 import traceback
 import shlex
+import signal
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Generator, List, Optional, Tuple
@@ -213,6 +214,91 @@ def _create_mlx_launch_dir() -> Path:
 
 def _write_text(path: Path, content: str) -> None:
     path.write_text(content, encoding="utf-8")
+
+
+def _latest_mlx_launch_meta() -> Tuple[Optional[dict], Optional[Path]]:
+    root = _mlx_launch_root()
+    if not root.exists():
+        return None, None
+    candidates = sorted(
+        [p for p in root.iterdir() if p.is_dir()],
+        key=lambda p: p.stat().st_mtime if p.exists() else 0,
+        reverse=True,
+    )
+    for launch_dir in candidates:
+        meta = _read_json(launch_dir / "launch.json")
+        if isinstance(meta, dict):
+            return meta, launch_dir
+    return None, None
+
+
+def _terminate_pid_tree(pid: int) -> bool:
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return True
+    except Exception as e:
+        logger.error(f"_terminate_pid_tree(SIGTERM {pid}): {e}")
+        return False
+
+    deadline = time.monotonic() + 5.0
+    while time.monotonic() < deadline:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return True
+        except Exception:
+            break
+        time.sleep(0.1)
+
+    try:
+        os.kill(pid, signal.SIGKILL)
+        return True
+    except ProcessLookupError:
+        return True
+    except Exception as e:
+        logger.error(f"_terminate_pid_tree(SIGKILL {pid}): {e}")
+        return False
+
+
+def _stop_mlx_server() -> Dict[str, Any]:
+    meta, launch_dir = _latest_mlx_launch_meta()
+    pids = []
+    if isinstance(meta, dict):
+        pid = meta.get("pid")
+        if isinstance(pid, int):
+            pids.append(pid)
+
+    if not pids:
+        try:
+            r = subprocess.run(["pgrep", "-f", r"mlx_lm\.server"],
+                               capture_output=True, text=True, timeout=3)
+            pids = [int(p) for p in r.stdout.split() if p.isdigit()]
+        except Exception as e:
+            logger.error(f"_stop_mlx_server(pgrep): {e}")
+
+    if not pids:
+        return {
+            "ok": False,
+            "status": "not_running",
+            "message": "MLX server does not appear to be running.",
+        }
+
+    stopped = False
+    for pid in pids:
+        stopped = _terminate_pid_tree(pid) or stopped
+
+    if launch_dir and isinstance(meta, dict):
+        meta["status"] = "stopped" if stopped else "stop_failed"
+        meta["finished_at"] = datetime.now().isoformat()
+        _write_json(launch_dir / "launch.json", meta)
+
+    return {
+        "ok": stopped,
+        "status": "stopped" if stopped else "error",
+        "message": "MLX server stopped." if stopped else "Failed to stop MLX server.",
+        "pids": pids,
+    }
 
 
 def _launch_mlx_server(settings: Dict[str, Any]) -> Dict[str, Any]:
@@ -528,6 +614,26 @@ def _register_routes(app: Flask) -> None:
             return jsonify(result), status
         except Exception as e:
             logger.error(f"api_mlx_start: {e}")
+            return jsonify({
+                "ok": False,
+                "status": "error",
+                "message": str(e),
+            }), 500
+
+    @app.route("/api/mlx/stop", methods=["POST"])
+    def api_mlx_stop():
+        if sys.platform != "darwin":
+            return jsonify({
+                "ok": False,
+                "status": "unsupported",
+                "message": "MLX quit is only available on macOS.",
+            }), 400
+        try:
+            result = _stop_mlx_server()
+            status = 200 if result.get("ok") else 500
+            return jsonify(result), status
+        except Exception as e:
+            logger.error(f"api_mlx_stop: {e}")
             return jsonify({
                 "ok": False,
                 "status": "error",

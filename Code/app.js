@@ -13,6 +13,7 @@ const API = {
   models:     ()      => fetch("/api/models").then(r => r.json()),
   ps:         (model) => fetch(`/api/ps?model=${encodeURIComponent(model)}`).then(r => r.json()),
   launchMlx:  ()      => fetch("/api/mlx/start", {method: "POST"}).then(r => r.json()),
+  stopMlx:    ()      => fetch("/api/mlx/stop", {method: "POST"}).then(r => r.json()),
   title:      (model, text, reply) => fetch("/api/title", _json({model, text, reply})).then(r => r.json()),
   chats:      ()      => fetch("/api/chats").then(r => r.json()),
   search:     (q)     => fetch(`/api/search?q=${encodeURIComponent(q)}`).then(r => r.json()),
@@ -42,6 +43,8 @@ const state = {
   isMacOS:       false,
   mlxLaunchEnabled: true,
   mlxLaunchBusy: false,
+  mlxLaunchRunning: false,
+  mlxLaunchStopping: false,
   mlxLaunchPoll: null,
   streaming:     false,
   pendingDel:    null,
@@ -167,6 +170,7 @@ async function loadModels() {
     const models = resp.models || [];
     const online = !!resp.online;
     state.backend = resp.backend || state.backend || "ollama";
+    state.mlxLaunchRunning = state.backend === "mlx" && online;
     updateBackendBadge();
     updateMlxLaunchControls();
 
@@ -201,6 +205,7 @@ async function loadModels() {
     persistActiveModel();
     updateMlxLaunchControls();
   } catch (_) {
+    if (state.backend === "mlx") state.mlxLaunchRunning = false;
     els.modelSelect.innerHTML =
       `<option value="">${state.backend === "mlx"
         ? "MLX server offline"
@@ -227,6 +232,8 @@ function updateMlxLaunchControls() {
 
   if (!show) {
     state.mlxLaunchBusy = false;
+    state.mlxLaunchRunning = false;
+    state.mlxLaunchStopping = false;
     if (els.mlxLaunchStatus) els.mlxLaunchStatus.textContent = "";
     els.btnMlxLaunch.disabled = false;
     els.btnMlxLaunch.textContent = "Start MLX server";
@@ -235,7 +242,10 @@ function updateMlxLaunchControls() {
 
   if (state.mlxLaunchBusy) {
     els.btnMlxLaunch.disabled = true;
-    els.btnMlxLaunch.textContent = "Starting…";
+    els.btnMlxLaunch.textContent = state.mlxLaunchStopping ? "Stopping…" : "Starting…";
+  } else if (state.mlxLaunchRunning) {
+    els.btnMlxLaunch.disabled = false;
+    els.btnMlxLaunch.textContent = "Quit MLX Server";
   } else {
     els.btnMlxLaunch.disabled = false;
     els.btnMlxLaunch.textContent = "Start MLX server";
@@ -264,6 +274,7 @@ async function startMlxServer() {
   if (state.mlxLaunchBusy) return;
 
   state.mlxLaunchBusy = true;
+  state.mlxLaunchStopping = false;
   setMlxLaunchStatus("Launching MLX server…", "");
   updateMlxLaunchControls();
 
@@ -281,12 +292,14 @@ async function startMlxServer() {
       const msg = resp.message || "MLX server is already running.";
       setMlxLaunchStatus(msg, "ok");
       showStatus(msg, "ok");
+      state.mlxLaunchRunning = true;
       await loadModels();
       updateStats();
       return;
     }
 
     keepPolling = true;
+    state.mlxLaunchRunning = false;
     const logHint = resp.log_dir ? ` Logs: ${resp.log_dir.split("/").slice(-2).join("/")}.` : "";
     const msg = (resp.message || "MLX server launch started.") + logHint;
     setMlxLaunchStatus(msg, "ok");
@@ -301,6 +314,52 @@ async function startMlxServer() {
       state.mlxLaunchBusy = false;
       updateMlxLaunchControls();
     }
+  }
+}
+
+async function stopMlxServer() {
+  if (!state.isMacOS) {
+    showStatus("MLX quit is available on macOS only.", "warn");
+    return;
+  }
+  if (state.backend !== "mlx") {
+    showStatus("Switch the backend to MLX before quitting the server.", "warn");
+    return;
+  }
+  if (!state.mlxLaunchRunning) {
+    showStatus("MLX server is not running.", "warn");
+    return;
+  }
+  if (state.mlxLaunchBusy) return;
+
+  state.mlxLaunchBusy = true;
+  state.mlxLaunchStopping = true;
+  setMlxLaunchStatus("Stopping MLX server…", "");
+  updateMlxLaunchControls();
+
+  try {
+    const resp = await API.stopMlx();
+    if (!resp || !resp.ok) {
+      const msg = (resp && resp.message) || "Failed to stop MLX server.";
+      setMlxLaunchStatus(msg, "err");
+      showStatus(msg, "err");
+      return;
+    }
+
+    state.mlxLaunchRunning = false;
+    const msg = resp.message || "MLX server stopped.";
+    setMlxLaunchStatus(msg, "ok");
+    showStatus(msg, "ok");
+    await loadModels();
+    updateStats();
+  } catch (err) {
+    const msg = `Failed to stop MLX server: ${err.message || err}`;
+    setMlxLaunchStatus(msg, "err");
+    showStatus(msg, "err");
+  } finally {
+    state.mlxLaunchBusy = false;
+    state.mlxLaunchStopping = false;
+    updateMlxLaunchControls();
   }
 }
 
@@ -320,6 +379,8 @@ function scheduleMlxStartupPoll() {
           state.mlxLaunchPoll = null;
         }
         state.mlxLaunchBusy = false;
+        state.mlxLaunchRunning = true;
+        state.mlxLaunchStopping = false;
         updateMlxLaunchControls();
         setMlxLaunchStatus("MLX server is online.", "ok");
         await loadModels();
@@ -1450,7 +1511,13 @@ function attachEventListeners() {
   });
 
   if (els.btnMlxLaunch) {
-    els.btnMlxLaunch.addEventListener("click", startMlxServer);
+    els.btnMlxLaunch.addEventListener("click", () => {
+      if (state.mlxLaunchRunning) {
+        stopMlxServer();
+      } else {
+        startMlxServer();
+      }
+    });
   }
 
   els.btnContextAdd.addEventListener("click", () => addContextPath());
